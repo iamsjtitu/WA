@@ -116,6 +116,8 @@ class UserOut(BaseModel):
     company: Optional[str] = None
     country: Optional[str] = None
     city: Optional[str] = None
+    impersonated_by: Optional[str] = None
+    impersonated_by_email: Optional[str] = None
 
 
 class CustomerCreateIn(BaseModel):
@@ -222,6 +224,8 @@ def user_to_out(u: dict) -> UserOut:
         company=u.get("company"),
         country=u.get("country"),
         city=u.get("city"),
+        impersonated_by=u.get("impersonated_by"),
+        impersonated_by_email=u.get("impersonated_by_email"),
     )
 
 
@@ -492,6 +496,140 @@ async def regen_key(customer_id: str, _: dict = Depends(admin_only)):
     new_key = gen_api_key()
     await db.users.update_one({"id": customer_id}, {"$set": {"api_key": new_key}})
     return {"api_key": new_key}
+
+
+@api.post("/admin/customers/{customer_id}/impersonate")
+async def impersonate_customer(
+    customer_id: str,
+    request: Request,
+    response: Response,
+    admin: dict = Depends(admin_only),
+):
+    customer = await db.users.find_one(
+        {"id": customer_id, "role": "customer"}, {"_id": 0, "password_hash": 0}
+    )
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    if admin["id"] == customer_id:
+        raise HTTPException(status_code=400, detail="Cannot impersonate yourself")
+
+    # Issue impersonation token (4h max)
+    imp_token = auth_mod.create_access_token(
+        customer["id"],
+        customer["email"],
+        "customer",
+        impersonated_by=admin["id"],
+        impersonated_by_email=admin["email"],
+        hours=4,
+    )
+
+    # Save the admin's current access token in a separate cookie so they can exit
+    current_token = request.cookies.get("access_token")
+    if current_token:
+        response.set_cookie(
+            key="admin_original_token",
+            value=current_token,
+            httponly=True,
+            secure=True,
+            samesite="none",
+            max_age=4 * 3600,
+            path="/",
+        )
+
+    # Replace access token with impersonation token
+    response.set_cookie(
+        key="access_token",
+        value=imp_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=4 * 3600,
+        path="/",
+    )
+
+    # Audit log
+    try:
+        await db.audit_logs.insert_one(
+            {
+                "id": new_id(),
+                "type": "impersonation_start",
+                "admin_id": admin["id"],
+                "admin_email": admin["email"],
+                "customer_id": customer["id"],
+                "customer_email": customer["email"],
+                "ip": request.client.host if request.client else None,
+                "user_agent": request.headers.get("user-agent"),
+                "at": now_iso(),
+            }
+        )
+    except Exception:
+        logger.exception("audit log write failed")
+
+    return {"ok": True, "user": user_to_out({**customer, "impersonated_by": admin["id"], "impersonated_by_email": admin["email"]}).model_dump()}
+
+
+@api.post("/auth/exit-impersonation")
+async def exit_impersonation(request: Request, response: Response):
+    admin_token = request.cookies.get("admin_original_token")
+    if not admin_token:
+        raise HTTPException(status_code=400, detail="Not in impersonation mode")
+    try:
+        payload = auth_mod.decode_token(admin_token)
+        if payload.get("type") != "access":
+            raise HTTPException(status_code=401, detail="Invalid admin token type")
+        admin = await db.users.find_one(
+            {"id": payload["sub"]}, {"_id": 0, "password_hash": 0}
+        )
+        if not admin or admin.get("role") != "admin":
+            raise HTTPException(status_code=401, detail="Original admin not found")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+
+    # Restore admin token (re-issue fresh 12h cookie since the saved one keeps original exp)
+    fresh_admin_token = auth_mod.create_access_token(
+        admin["id"], admin["email"], admin["role"]
+    )
+    response.set_cookie(
+        key="access_token",
+        value=fresh_admin_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=12 * 3600,
+        path="/",
+    )
+    response.delete_cookie("admin_original_token", path="/")
+
+    # Audit log
+    try:
+        await db.audit_logs.insert_one(
+            {
+                "id": new_id(),
+                "type": "impersonation_end",
+                "admin_id": admin["id"],
+                "admin_email": admin["email"],
+                "at": now_iso(),
+            }
+        )
+    except Exception:
+        pass
+
+    return {"ok": True, "user": user_to_out(admin).model_dump()}
+
+
+@api.get("/admin/audit-logs")
+async def audit_logs(
+    _: dict = Depends(admin_only),
+    limit: int = Query(default=100, le=500),
+    type: Optional[str] = None,
+):
+    q = {}
+    if type:
+        q["type"] = type
+    cursor = db.audit_logs.find(q, {"_id": 0}).sort("at", -1).limit(limit)
+    return await cursor.to_list(length=limit)
 
 
 @api.get("/admin/stats")

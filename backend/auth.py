@@ -28,14 +28,24 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
-def create_access_token(user_id: str, email: str, role: str) -> str:
+def create_access_token(
+    user_id: str,
+    email: str,
+    role: str,
+    impersonated_by: Optional[str] = None,
+    impersonated_by_email: Optional[str] = None,
+    hours: int = 12,
+) -> str:
     payload = {
         "sub": user_id,
         "email": email,
         "role": role,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=12),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=hours),
         "type": "access",
     }
+    if impersonated_by:
+        payload["impersonated_by"] = impersonated_by
+        payload["impersonated_by_email"] = impersonated_by_email
     return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
 
 
@@ -73,6 +83,9 @@ async def get_current_user(request: Request, db) -> dict:
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
+        if payload.get("impersonated_by"):
+            user["impersonated_by"] = payload["impersonated_by"]
+            user["impersonated_by_email"] = payload.get("impersonated_by_email")
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")

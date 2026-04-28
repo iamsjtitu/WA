@@ -41,8 +41,15 @@ export function AuthProvider({ children }) {
     setUser(false);
   };
 
+  const exitImpersonation = async () => {
+    const { data } = await api.post("/auth/exit-impersonation");
+    setUser(data?.user || null);
+    if (!data?.user) await fetchMe();
+    return data?.user;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, setUser, login, register, logout, refresh: fetchMe, error, setError }}>
+    <AuthContext.Provider value={{ user, setUser, login, register, logout, refresh: fetchMe, error, setError, exitImpersonation }}>
       {children}
     </AuthContext.Provider>
   );

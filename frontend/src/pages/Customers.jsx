@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
+import { useAuth } from "../contexts/AuthContext";
 import { PageHeader } from "./Overview";
 import { Modal } from "./Sessions";
-import { Plus, Trash, Copy, ArrowsClockwise, Eye } from "@phosphor-icons/react";
+import { Plus, Trash, Copy, ArrowsClockwise, Eye, UserSwitch } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 export default function Customers() {
@@ -11,6 +13,21 @@ export default function Customers() {
   const [showCreate, setShowCreate] = useState(false);
   const [showKey, setShowKey] = useState(null);
   const [viewing, setViewing] = useState(null);
+  const { setUser } = useAuth();
+  const navigate = useNavigate();
+
+  const impersonate = async (customer) => {
+    if (!confirm(`Log in as ${customer.email}? Your admin session is preserved — exit anytime via the yellow banner.`)) return;
+    try {
+      const { data } = await api.post(`/admin/customers/${customer.id}/impersonate`);
+      setUser(data.user);
+      toast.success(`Now signed in as ${customer.name}`);
+      setViewing(null);
+      navigate("/app", { replace: true });
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Impersonation failed");
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -194,6 +211,15 @@ export default function Customers() {
             {viewing.user.webhook_url && (
               <DetailRow label="Webhook" value={viewing.user.webhook_url} mono break />
             )}
+          </div>
+          <div className="mt-5 border-t border-neutral-200 pt-4 flex justify-end">
+            <button
+              onClick={() => impersonate(viewing.user)}
+              className="btn-brand text-sm inline-flex items-center gap-2"
+              data-testid="impersonate-btn"
+            >
+              <UserSwitch size={14} weight="fill" /> Impersonate (debug as customer)
+            </button>
           </div>
         </Modal>
       )}

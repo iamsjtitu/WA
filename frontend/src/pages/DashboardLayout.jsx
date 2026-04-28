@@ -1,5 +1,6 @@
 import { NavLink, Outlet, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import ImpersonationBanner from "../components/ImpersonationBanner";
 import {
   ChatCircle,
   Gauge,
@@ -95,7 +96,8 @@ export default function DashboardLayout() {
         </div>
       </aside>
 
-      <main className="min-h-screen overflow-auto">
+      <main className="min-h-screen overflow-auto flex flex-col">
+        <ImpersonationBanner />
         <Outlet />
       </main>
     </div>
