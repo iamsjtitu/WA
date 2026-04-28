@@ -184,6 +184,56 @@ echo curl_exec($ch);`
       </section>
 
       <section className="mt-10 border-t border-neutral-200 pt-10">
+        <h2 className="font-display text-2xl tracking-tight">v2 (360messenger-compatible)</h2>
+        <p className="text-sm text-neutral-600 mt-2 max-w-3xl">
+          Drop-in compatible with{" "}
+          <code className="kbd">api.360messenger.com/v2/*</code>. Bearer auth, multipart bodies, identical
+          response shapes — switch from 360messenger by just changing the host.
+        </p>
+
+        <h3 className="font-display font-semibold mt-5">POST /api/v2/sendMessage</h3>
+        {code(
+          "v2-send",
+          `curl -X POST ${apiBase}/v2/sendMessage \\
+  -H "Authorization: Bearer ${user?.api_key || "wapi_•••"}" \\
+  --form 'phonenumber="447488888888"' \\
+  --form 'text="Hello World!"' \\
+  --form 'url="https://example.com/photo.jpg"' \\
+  --form 'delay="01-31-2026 09:30"'   # optional GMT schedule`
+        )}
+
+        <h3 className="font-display font-semibold mt-5">POST /api/v2/sendGroup</h3>
+        {code(
+          "v2-group",
+          `curl -X POST ${apiBase}/v2/sendGroup \\
+  -H "Authorization: Bearer ${user?.api_key || "wapi_•••"}" \\
+  --form 'groupId="120363012345678901"' \\
+  --form 'text="Hello group!"'`
+        )}
+
+        <h3 className="font-display font-semibold mt-5">GET /api/v2/message/status?id=...</h3>
+        {code(
+          "v2-status",
+          `curl "${apiBase}/v2/message/status?id=<msg-uuid>" \\
+  -H "Authorization: Bearer ${user?.api_key || "wapi_•••"}"`
+        )}
+
+        <h3 className="font-display font-semibold mt-5">GET /api/v2/message/sentMessages</h3>
+        {code(
+          "v2-sent",
+          `curl "${apiBase}/v2/message/sentMessages?page=1" \\
+  -H "Authorization: Bearer ${user?.api_key || "wapi_•••"}"`
+        )}
+
+        <h3 className="font-display font-semibold mt-5">GET /api/v2/message/receivedMessages</h3>
+        {code(
+          "v2-received",
+          `curl "${apiBase}/v2/message/receivedMessages?page=1" \\
+  -H "Authorization: Bearer ${user?.api_key || "wapi_•••"}"`
+        )}
+      </section>
+
+      <section className="mt-10 border-t border-neutral-200 pt-10">
         <h2 className="font-display text-2xl tracking-tight">Inbound webhook</h2>
         <p className="text-sm text-neutral-600 mt-3 max-w-3xl">
           Set a webhook URL in <a href="/app/settings" className="text-[#002FA7] underline">Settings</a>.
@@ -252,6 +302,47 @@ async def webhook(request: Request):
     print("inbound from", data["from"], ":", data["text"])
     return {"ok": True}`
         )}
+      </section>
+
+      <section className="mt-10 border-t border-neutral-200 pt-10">
+        <h2 className="font-display text-2xl tracking-tight">Integrations & plugins</h2>
+        <p className="text-sm text-neutral-600 mt-2 max-w-3xl">
+          Drop-in plugins so non-developer customers can ship WhatsApp notifications without writing code.
+        </p>
+        <div className="mt-6 grid sm:grid-cols-2 gap-4">
+          <a
+            href={`${apiBase}/plugins/whmcs.zip`}
+            className="border border-neutral-200 sharp p-5 hover:bg-neutral-50 transition-colors flex items-start gap-3"
+            data-testid="download-whmcs"
+          >
+            <div className="w-10 h-10 bg-[#002FA7]/10 text-[#002FA7] flex items-center justify-center sharp font-display font-bold">W</div>
+            <div>
+              <h3 className="font-display font-semibold">WHMCS Module</h3>
+              <p className="text-xs text-neutral-600 mt-1">
+                Send WhatsApp from invoice events, ticket replies, signups. PHP curl helper included.
+              </p>
+              <span className="font-mono text-[11px] uppercase tracking-widest text-[#002FA7] mt-2 inline-block">
+                ↓ download .zip
+              </span>
+            </div>
+          </a>
+          <a
+            href={`${apiBase}/plugins/woocommerce.zip`}
+            className="border border-neutral-200 sharp p-5 hover:bg-neutral-50 transition-colors flex items-start gap-3"
+            data-testid="download-woocommerce"
+          >
+            <div className="w-10 h-10 bg-[#7B2D8E]/10 text-[#7B2D8E] flex items-center justify-center sharp font-display font-bold">Wo</div>
+            <div>
+              <h3 className="font-display font-semibold">WooCommerce Plugin</h3>
+              <p className="text-xs text-neutral-600 mt-1">
+                Auto-WhatsApp on order paid / processing with templates. Settings under WP → Options.
+              </p>
+              <span className="font-mono text-[11px] uppercase tracking-widest text-[#002FA7] mt-2 inline-block">
+                ↓ download .zip
+              </span>
+            </div>
+          </a>
+        </div>
       </section>
 
       <section className="mt-10 border border-neutral-200 sharp p-6 bg-yellow-50">

@@ -1,0 +1,56 @@
+{
+  "summary": "Iteration 4 backend testing complete: 360messenger v2 API compat (sendMessage, sendGroup, message/status, sentMessages, receivedMessages, account), bearer/X-API-Key/?token auth, MM-DD-YYYY HH:MM GMT delay parser + scheduled_messages persistence, background dispatcher (60s loop) actually claims past-due pending docs (verified end-to-end with 75s wait), per-session settings (default_country_code/auto_prefix/receive_messages/mark_as_seen) + GET /sessions/{id}/messages with direction filter + cross-user 404, plugin downloads (whmcs.zip & woocommerce.zip → 200 application/zip with PK magic). All 94/94 pytest tests pass (72 carryover from iteration_3 + 22 new for iteration_4). One iteration_3 test (TestWebhookRetry::test_failure_increments_counter) was updated to poll because main agent correctly applied the iteration_3 action item and wrapped /me/webhook/test with asyncio.create_task — counter now increments asynchronously after ~26s.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/v2/sendMessage (schedule path)", "issue": "HTTP status returned is 200 but JSON body says statusCode=201. The handler returns a dict via v2_ok(..., 201) but the FastAPI route does not declare status_code=201, so the wire-level HTTP status is the default 200. 360messenger returns HTTP 201 for schedule responses — clients that gate on r.status_code==201 will fail. Add @api.post('/v2/sendMessage', status_code=201) or set Response.status_code dynamically based on the dict."},
+      {"endpoint": "POST /api/v2/sendGroup (schedule path)", "issue": "Same HTTP 200 vs body statusCode=201 mismatch."},
+      {"endpoint": "POST /api/v2/sendMessage with delay='', date in past, or unparseable", "issue": "Silently falls through to immediate send. 360messenger's behavior is to error if the delay is in the past — consider returning 400 'delay must be in the future' for clarity."},
+      {"endpoint": "GET /api/v2/message/sentMessages?phonenumber=91", "issue": "Filter uses {'$regex': re.escape(phone)} on the 'to' field — this matches '91' anywhere in the number, including '+15919...'. 360messenger semantics is normally a prefix match. Anchor with '^' if prefix-match is intended."},
+      {"endpoint": "POST /api/v2/sendMessage url= path", "issue": "When url= is provided, server fetches the URL with httpx.AsyncClient(timeout=30, follow_redirects=True) without any size/MIME validation. A malicious customer (or compromised key) can DoS the backend with a multi-GB stream or pivot through the server to reach internal IPs (SSRF). Add max-content-length, content-type allowlist, and block private/loopback ranges."},
+      {"endpoint": "POST /api/v2/sendMessage", "issue": "_maybe_apply_country_code uses heuristic 'len(phone) <= 11' to decide whether to prefix the country code. US numbers are 10 digits, India 10 digits, but UK can be 10-11. The heuristic will silently double-prefix some numbers. Make it explicit (e.g. only prefix if phone starts with 0, or always strip + before comparing)."},
+      {"endpoint": "Scheduled dispatcher (_scheduled_dispatcher)", "issue": "60s sleep at the bottom — minimum lateness for a scheduled message is up to 60s past run_at. Document this or shorten to 15-20s for better UX."},
+      {"endpoint": "Scheduled dispatcher", "issue": "Claim is 'pending' -> 'running' but no heartbeat or stuck-job recovery. If the worker crashes mid-send, the doc will sit in 'running' forever. Consider a TTL on running state (e.g. requeue if running > 5min)."},
+      {"endpoint": "PATCH /api/sessions/{id}/settings", "issue": "default_country_code stripped to digits silently — so '+91' and '91' both become '91' (good), but 'abc' becomes '' which $sets an empty string instead of raising 400. Validate that at least one digit remains after sanitization."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration4.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/iteration4.xml"
+  ],
+  "action_items": [
+    "Make POST /api/v2/sendMessage and /v2/sendGroup return HTTP 201 (currently 200) so the wire-level status matches the JSON statusCode field; otherwise migrating customers checking r.status_code break.",
+    "Reject past or unparseable delay values explicitly (return 400) rather than silently sending immediately.",
+    "Anchor sentMessages phonenumber filter with '^' for prefix-match semantics matching 360messenger.",
+    "Harden v2/sendMessage url= fetch path: add max-content-length, content-type allowlist, and SSRF guard (block private/loopback IPs).",
+    "Improve _maybe_apply_country_code to be deterministic (strip leading '0' or '+' instead of length heuristic).",
+    "Add TTL/stuck-job recovery for scheduled_messages docs left in status='running' (e.g. requeue if running >5min).",
+    "Validate PATCH /sessions/{id}/settings.default_country_code yields at least one digit after sanitization; otherwise 400."
+  ],
+  "critical_code_review_comments": [
+    "v2_compat.py 473 lines — single giant file mixing auth, scheduling, status, lists, account. Split into v2_send.py / v2_status.py / v2_account.py routers for maintainability.",
+    "v2_compat.py uses datetime.strptime/replace(tzinfo=UTC) for delay parsing — but the docstring says GMT. GMT == UTC for our purposes, but docstring should clarify and the parser should reject explicit timezone offsets in the string (currently strpttime would simply fail).",
+    "_scheduled_dispatcher catches generic Exception and silently continues the outer while-True loop — any consistent failure (e.g. mongo lost connection) loops forever without backoff. Add exponential backoff on outer-loop exceptions.",
+    "scheduled_messages docs reuse 'sent_at' field for both 'claimed_at' (when set to running) and 'sent_at' (when sent). Two different semantic events under one field — split into claimed_at + sent_at.",
+    "send_group_v2 inserts to db.messages on failure with status='failed' but does NOT increment quota_used (correct), yet on success it $incs by 1. send_message_v2 only $incs on msg.status=='sent' — consistent. Group send code path duplicates a lot of the message send code path — extract a common helper.",
+    "v2_compat.user_from_bearer accepts api_key in 3 different places (Authorization Bearer, X-API-Key header, ?token query). Query-string token leaks into nginx access logs and browser history — drop ?token support or warn-log + rate-limit it.",
+    "Plugin zip endpoints have no caching headers (Cache-Control / ETag) — every download re-streams from disk. Add cache headers and consider CDN-friendly URL.",
+    "Plugin zip endpoints are public (no auth). Anyone can download the WHMCS/WooCommerce plugins. Acceptable for marketing, but if these contain customer-specific config baking is planned, add auth.",
+    "server.py is now 1346 lines — billing.py 676, v2_compat.py 473. Time to split server.py into routers/ subpackage (auth.py, sessions.py, messages.py, internal.py, public_v1.py, plugins.py).",
+    "/api/sessions/{id}/messages returns max 200 messages with no cursor/pagination — UI cannot scroll history beyond 200. Add ?before=<sent_at> cursor."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration4.py",
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (94/94)", "frontend": "n/a (skipped per request)"},
+  "test_credentials": "admin@wapihub.com / admin123. Customer accounts auto-registered fresh per test session.",
+  "seed_data_creation": "Each pytest run registers TEST_iter4_* customers and TEST_v2_* sessions (cleaned up in fixtures). Iteration_4 uses pymongo direct writes to (a) flip a session.status to 'connected' (b) seed messages for status/list tests (c) insert a past-due scheduled_messages doc (cleaned up after assertion). One scheduled_messages dispatcher test takes ~60-75s (waiting for the 60s loop to fire). Total suite runs in ~110s.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All iteration_4 features verified end-to-end including the scheduler dispatcher (verified by inserting a past-due pending doc and observing status transition to running/sent/failed within 75s). Real WhatsApp connect / QR scan / actual outbound delivery still not in scope — sendMessage immediate path still returns failure when no real Baileys connection. v2 schedule path was tested by direct mongo write of session.status='connected' to bypass Baileys check. The HTTP 200 vs body statusCode=201 mismatch is the most user-visible 360messenger compat gap — main agent should fix by adding status_code=201 decorator to v2 send endpoints. Iteration_3 webhook test was adjusted (poll instead of synchronous) because main agent applied the iteration_3 action item to wrap /me/webhook/test with asyncio.create_task — that change is correct and verified.",
+  "rca of the issue": "n/a — no failures."
+}

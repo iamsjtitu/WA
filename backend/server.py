@@ -39,6 +39,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 import auth as auth_mod
 import billing as billing_mod
+import v2_compat
 import wa_client
 import wa_supervisor
 
@@ -110,6 +111,14 @@ class CustomerUpdateIn(BaseModel):
 
 class SessionCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=60)
+
+
+class SessionSettingsIn(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=60)
+    default_country_code: Optional[str] = Field(default=None, max_length=4)
+    auto_prefix: Optional[bool] = None
+    receive_messages: Optional[bool] = None
+    mark_as_seen: Optional[bool] = None
 
 
 class SendMessageIn(BaseModel):
@@ -513,6 +522,10 @@ async def create_session_endpoint(
         "name": payload.name.strip(),
         "phone": None,
         "status": "starting",
+        "default_country_code": "",
+        "auto_prefix": False,
+        "receive_messages": True,
+        "mark_as_seen": False,
         "created_at": now_iso(),
     }
     await db.wa_sessions.insert_one(doc)
@@ -523,6 +536,49 @@ async def create_session_endpoint(
         raise HTTPException(status_code=500, detail=f"WA service error: {e}")
     doc.pop("_id", None)
     return doc
+
+
+@api.patch("/sessions/{session_id}/settings")
+async def update_session_settings(
+    session_id: str,
+    payload: SessionSettingsIn,
+    user: dict = Depends(current_user),
+):
+    s = await db.wa_sessions.find_one(
+        {"id": session_id, "user_id": user["id"]}, {"_id": 0}
+    )
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    update = {
+        k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None
+    }
+    if "default_country_code" in update:
+        update["default_country_code"] = re.sub(
+            r"[^0-9]", "", update["default_country_code"] or ""
+        )
+    if not update:
+        return s
+    await db.wa_sessions.update_one({"id": session_id}, {"$set": update})
+    return await db.wa_sessions.find_one(
+        {"id": session_id}, {"_id": 0}
+    )
+
+
+@api.get("/sessions/{session_id}/messages")
+async def session_messages(
+    session_id: str,
+    user: dict = Depends(current_user),
+    direction: Optional[str] = None,
+    limit: int = Query(default=50, le=200),
+):
+    s = await db.wa_sessions.find_one({"id": session_id, "user_id": user["id"]})
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    q: dict = {"session_id": session_id, "user_id": user["id"]}
+    if direction in ("inbound", "outbound"):
+        q["direction"] = direction
+    cursor = db.messages.find(q, {"_id": 0}).sort("sent_at", -1).limit(limit)
+    return await cursor.to_list(length=limit)
 
 
 @api.get("/sessions/{session_id}/status")
@@ -1052,10 +1108,150 @@ async def health():
     return {"api": "ok", "wa_service": "ok" if wa_ok else "down"}
 
 
+# ---------------- Plugin downloads ----------------
+PLUGINS_DIR = PathLib("/app/backend/static/plugins")
+
+
+@api.get("/plugins/whmcs.zip")
+async def download_whmcs_plugin():
+    from fastapi.responses import FileResponse
+    p = PLUGINS_DIR / "whmcs.zip"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="plugin not built")
+    return FileResponse(p, media_type="application/zip", filename="wapihub-whmcs.zip")
+
+
+@api.get("/plugins/woocommerce.zip")
+async def download_woocommerce_plugin():
+    from fastapi.responses import FileResponse
+    p = PLUGINS_DIR / "woocommerce.zip"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="plugin not built")
+    return FileResponse(p, media_type="application/zip", filename="wapihub-woocommerce.zip")
+
+
 # ---------------- Wire app ----------------
 app.include_router(api)
 # Billing router (plans, subscriptions, webhooks for stripe/razorpay/paypal)
 app.include_router(billing_mod.make_router(db, current_user, admin_only), prefix="/api")
+# 360messenger v2 compatibility layer
+app.include_router(
+    v2_compat.make_router(db, wa_client, fire_webhook, _send_one, _send_media_one, _enforce_quota),
+    prefix="/api",
+)
+
+
+# ---------------- Scheduled message dispatcher ----------------
+async def _scheduled_dispatcher():
+    """Background loop that sends pending scheduled_messages whose run_at has passed."""
+    while True:
+        try:
+            now_str = datetime.now(timezone.utc).isoformat()
+            cursor = db.scheduled_messages.find(
+                {"status": "pending", "run_at": {"$lte": now_str}}, {"_id": 0}
+            ).limit(50)
+            due = await cursor.to_list(length=50)
+            for sched in due:
+                user = await db.users.find_one(
+                    {"id": sched["user_id"]}, {"_id": 0, "password_hash": 0}
+                )
+                if not user:
+                    await db.scheduled_messages.update_one(
+                        {"id": sched["id"]},
+                        {"$set": {"status": "failed", "error": "user not found", "sent_at": now_iso()}},
+                    )
+                    continue
+                # claim
+                claim = await db.scheduled_messages.update_one(
+                    {"id": sched["id"], "status": "pending"},
+                    {"$set": {"status": "running", "sent_at": now_iso()}},
+                )
+                if claim.modified_count == 0:
+                    continue
+
+                try:
+                    if sched.get("type") == "group":
+                        result = await wa_client.send_group(
+                            sched["session_id"],
+                            sched["target"],
+                            sched.get("text") or "",
+                            sched.get("url") or None,
+                        )
+                        await db.messages.insert_one(
+                            {
+                                "id": new_id(),
+                                "user_id": user["id"],
+                                "session_id": sched["session_id"],
+                                "direction": "outbound",
+                                "to": sched["target"],
+                                "text": sched.get("text") or "",
+                                "type": "group",
+                                "is_group": True,
+                                "has_media": bool(sched.get("url")),
+                                "status": "sent",
+                                "source": "schedule",
+                                "wa_message_id": result.get("message_id"),
+                                "sent_at": now_iso(),
+                            }
+                        )
+                    else:
+                        if sched.get("url"):
+                            try:
+                                async with httpx.AsyncClient(
+                                    timeout=30.0, follow_redirects=True
+                                ) as c:
+                                    r = await c.get(sched["url"])
+                                    r.raise_for_status()
+                                ext = PathLib(httpx.URL(sched["url"]).path).suffix or ""
+                                fp = UPLOAD_DIR / f"{new_id()}{ext}"
+                                fp.write_bytes(r.content)
+                                mime = (
+                                    r.headers.get("content-type", "application/octet-stream")
+                                    .split(";")[0]
+                                    .strip()
+                                )
+                                msg = await _send_media_one(
+                                    user["id"],
+                                    sched["session_id"],
+                                    sched["target"],
+                                    sched.get("text") or "",
+                                    str(fp),
+                                    PathLib(httpx.URL(sched["url"]).path).name or "file",
+                                    mime,
+                                    "schedule",
+                                )
+                            except Exception as e:
+                                msg = {"status": "failed", "error": f"download failed: {e}"}
+                        else:
+                            msg = await _send_one(
+                                user["id"],
+                                sched["session_id"],
+                                sched["target"],
+                                sched.get("text") or "",
+                                "schedule",
+                            )
+                    if msg.get("status") == "sent":
+                        await db.users.update_one(
+                            {"id": user["id"]}, {"$inc": {"quota_used": 1}}
+                        )
+                    await db.scheduled_messages.update_one(
+                        {"id": sched["id"]},
+                        {
+                            "$set": {
+                                "status": msg.get("status", "failed"),
+                                "error": msg.get("error"),
+                                "sent_at": now_iso(),
+                            }
+                        },
+                    )
+                except Exception as e:
+                    await db.scheduled_messages.update_one(
+                        {"id": sched["id"]},
+                        {"$set": {"status": "failed", "error": str(e), "sent_at": now_iso()}},
+                    )
+        except Exception:
+            logger.exception("scheduled dispatcher error")
+        await asyncio.sleep(60)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1078,8 +1274,14 @@ async def on_startup():
         await db.users.create_index("api_key", unique=True)
         await db.wa_sessions.create_index([("user_id", 1)])
         await db.messages.create_index([("user_id", 1), ("sent_at", -1)])
+        await db.scheduled_messages.create_index(
+            [("status", 1), ("run_at", 1)]
+        )
     except Exception:
         logger.exception("index creation failed (non-fatal)")
+
+    # spawn scheduled message dispatcher
+    asyncio.create_task(_scheduled_dispatcher())
 
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@wapihub.com").lower()
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")

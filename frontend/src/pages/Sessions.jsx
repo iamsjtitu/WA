@@ -128,8 +128,10 @@ export default function Sessions() {
               </tr>
             )}
             {sessions.map((s) => (
-              <tr key={s.id} data-testid={`session-row-${s.id}`}>
-                <td className="font-medium">{s.name}</td>
+              <tr key={s.id} data-testid={`session-row-${s.id}`} className="hover:bg-neutral-50 cursor-pointer" onClick={() => window.location.assign(`/app/sessions/${s.id}`)}>
+                <td className="font-medium">
+                  <span className="hover:underline">{s.name}</span>
+                </td>
                 <td className="font-mono text-xs">{s.phone || "—"}</td>
                 <td>
                   <span className="status-pill">
@@ -140,7 +142,7 @@ export default function Sessions() {
                   {new Date(s.created_at).toLocaleString()}
                 </td>
                 <td className="text-right">
-                  <div className="inline-flex gap-2">
+                  <div className="inline-flex gap-2" onClick={(e) => e.stopPropagation()}>
                     {s.status !== "connected" && (
                       <button
                         onClick={() => openQr(s.id)}

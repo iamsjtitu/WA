@@ -361,6 +361,44 @@ app.post("/sessions/:id/send-media", async (req, res) => {
   }
 });
 
+app.post("/sessions/:id/send-group", async (req, res) => {
+  const id = req.params.id;
+  const { group_id, text, url } = req.body || {};
+  if (!group_id) return res.status(400).json({ error: "group_id required" });
+
+  const m = ensureSession(id);
+  if (!m || m.status !== "connected") {
+    return res.status(400).json({ error: `session not connected (status=${m?.status || "not_started"})` });
+  }
+
+  const cleanGid = String(group_id).replace(/[^0-9A-Za-z\-]/g, "");
+  const jid = `${cleanGid}@g.us`;
+  try {
+    let result;
+    if (url) {
+      // download to temp + send as image (default)
+      const tmpFile = path.join(__dirname, "uploads", `${Date.now()}_grp_${Math.random().toString(36).slice(2)}.bin`);
+      const r = await fetch(url);
+      if (!r.ok) return res.status(400).json({ error: `failed to fetch url: HTTP ${r.status}` });
+      const buf = Buffer.from(await r.arrayBuffer());
+      fs.writeFileSync(tmpFile, buf);
+      const ct = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      let payload;
+      if (ct.startsWith("image/")) payload = { image: { url: tmpFile }, caption: text || undefined };
+      else if (ct.startsWith("video/")) payload = { video: { url: tmpFile }, caption: text || undefined };
+      else payload = { document: { url: tmpFile }, mimetype: ct || "application/octet-stream", caption: text || undefined };
+      result = await m.sock.sendMessage(jid, payload);
+      try { fs.unlinkSync(tmpFile); } catch {}
+    } else {
+      if (!text) return res.status(400).json({ error: "text or url required" });
+      result = await m.sock.sendMessage(jid, { text: String(text) });
+    }
+    res.json({ ok: true, message_id: result?.key?.id || null, group_id: cleanGid });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Restart any persisted sessions on boot
 async function restoreSessions() {
   if (!fs.existsSync(AUTH_ROOT)) return;

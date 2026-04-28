@@ -711,16 +711,24 @@ class TestWebhookRetry:
         base_count = int(base.get("webhook_consecutive_failures") or 0)
         assert base_count == 0, f"baseline not zero after enable: {base_count}"
 
-        # /test AWAITs fire_webhook: 4 attempts, exp backoff 0+2+6+18=~26s
-        t = customer_account["session"].post(f"{API}/me/webhook/test", timeout=90)
+        # NOTE (iteration 4): /me/webhook/test now spawns fire_webhook via
+        # asyncio.create_task, returning immediately. fire_webhook still does
+        # 4 attempts with exp backoff 0+2+6+18=~26s in the background. Poll
+        # /auth/me until the counter increments.
+        t = customer_account["session"].post(f"{API}/me/webhook/test", timeout=15)
         assert t.status_code == 200
         assert t.json().get("sent") is True
 
-        # Counter should have been incremented synchronously (after retries failed)
-        me = customer_account["session"].get(f"{API}/auth/me", timeout=10).json()
-        new_count = int(me.get("webhook_consecutive_failures") or 0)
-        assert new_count == base_count + 1, (
-            f"counter did not increment after retries: base={base_count} new={new_count}"
+        deadline = time.time() + 45
+        new_count = base_count
+        while time.time() < deadline:
+            me = customer_account["session"].get(f"{API}/auth/me", timeout=10).json()
+            new_count = int(me.get("webhook_consecutive_failures") or 0)
+            if new_count >= base_count + 1:
+                break
+            time.sleep(3)
+        assert new_count >= base_count + 1, (
+            f"counter did not increment after retries within 45s: base={base_count} new={new_count}"
         )
 
     def test_enable_resets_counter(self, customer_account):

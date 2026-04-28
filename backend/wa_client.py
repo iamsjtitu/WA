@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+from typing import Optional
+
 import httpx
 
 WA_SERVICE_URL = os.environ.get("WA_SERVICE_URL", "http://127.0.0.1:3001")
@@ -37,6 +39,23 @@ async def send_message(session_id: str, to: str, text: str) -> dict:
         r = await c.post(
             f"/sessions/{session_id}/send",
             json={"to": to, "text": text},
+        )
+        if r.status_code >= 400:
+            try:
+                detail = r.json().get("error", "send failed")
+            except Exception:
+                detail = "send failed"
+            raise RuntimeError(detail)
+        return r.json()
+
+
+async def send_group(
+    session_id: str, group_id: str, text: str, url: Optional[str] = None
+) -> dict:
+    async with _client() as c:
+        r = await c.post(
+            f"/sessions/{session_id}/send-group",
+            json={"group_id": group_id, "text": text, "url": url},
         )
         if r.status_code >= 400:
             try:
