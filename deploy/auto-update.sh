@@ -30,11 +30,12 @@ OLD_REQ=$(md5sum backend/requirements.txt 2>/dev/null | awk '{print $1}' || true
 OLD_FE=$(md5sum frontend/package.json 2>/dev/null | awk '{print $1}' || true)
 OLD_WA=$(md5sum wa-service/package.json 2>/dev/null | awk '{print $1}' || true)
 
-# Pull
+# Pull (use reset --hard so any local changes never block the update)
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
-log "▶ git fetch + pull origin $BRANCH"
+log "▶ git fetch + reset --hard origin/$BRANCH"
 git fetch --quiet origin
-git pull --quiet origin "$BRANCH"
+git reset --hard "origin/$BRANCH"
+git clean -fd --quiet
 log "▶ New HEAD: $(git rev-parse --short HEAD)"
 
 # Backend Python deps
