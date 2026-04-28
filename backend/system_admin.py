@@ -143,6 +143,31 @@ def make_router(admin_only):
                 status_code=500, detail=f"Auto-update script not found at {script}"
             )
 
+        # Refuse to run if there is nothing to pull — fetch latest then count.
+        rc, branch_raw, _ = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+        branch = (branch_raw or "").strip() or "main"
+        rc, _, fetch_err = _run(["git", "fetch", "--quiet", "origin"], timeout=30)
+        if rc != 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Cannot reach origin — please check your remote: "
+                    f"{(fetch_err or '').strip() or 'unknown error'}"
+                ),
+            )
+        rc, behind_str, _ = _run(
+            ["git", "rev-list", "--count", f"HEAD..origin/{branch}"]
+        )
+        try:
+            behind = int(behind_str.strip())
+        except ValueError:
+            behind = 0
+        if behind == 0:
+            raise HTTPException(
+                status_code=409,
+                detail="No new updates available — you're already on the latest commit.",
+            )
+
         # Prevent concurrent spawns within a short cooldown window
         now = time.time()
         with _UPDATE_LOCK:

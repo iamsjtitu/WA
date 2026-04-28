@@ -25,8 +25,10 @@ export default function AdminSystem() {
     try {
       const { data } = await api.get("/admin/system/status");
       setStatus(data);
+      return data;
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to load system status");
+      return null;
     } finally {
       setLoadingStatus(false);
     }
@@ -68,11 +70,14 @@ export default function AdminSystem() {
   }, [fetchStatus, fetchLog, stopTailing]);
 
   const onCheck = async () => {
-    await fetchStatus();
-    if (status?.behind_count > 0) {
-      toast.success(`${status.behind_count} new commit(s) available`);
-    } else if (status?.fetch_ok) {
-      toast.success("Already up to date");
+    const data = await fetchStatus();
+    if (!data) return;
+    if (!data.fetch_ok) {
+      toast.error("Cannot reach origin — check git remote");
+    } else if ((data.behind_count || 0) > 0) {
+      toast.success(`${data.behind_count} new commit(s) available`);
+    } else {
+      toast.info("No new updates available — you're on the latest commit");
     }
   };
 
@@ -199,12 +204,25 @@ export default function AdminSystem() {
             </div>
             <button
               onClick={onUpdate}
-              disabled={updating || !status?.fetch_ok}
+              disabled={
+                updating || !status?.fetch_ok || (status?.behind_count || 0) === 0
+              }
+              title={
+                !status?.fetch_ok
+                  ? "Cannot reach origin"
+                  : (status?.behind_count || 0) === 0
+                  ? "No new updates available"
+                  : "Pull latest code and restart services"
+              }
               className="px-4 py-2 text-sm bg-[#1FA855] text-white hover:bg-[#178c47] sharp inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
               data-testid="update-now-btn"
             >
               <CloudArrowDown size={16} weight="fill" />
-              {updating ? "Starting…" : "Update Now"}
+              {updating
+                ? "Starting…"
+                : (status?.behind_count || 0) === 0
+                ? "No updates available"
+                : `Update Now (${status.behind_count})`}
             </button>
           </div>
         )}
