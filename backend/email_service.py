@@ -201,6 +201,83 @@ the payment from the billing page.</p>
     return await send_email(user["email"], "[wa.9x.design] Payment failed — action required", html)
 
 
+# ---------------- Onboarding / security emails ----------------
+# These are transactional onboarding/security messages and intentionally bypass
+# the user's `email_notifications` toggle (which only controls service alerts).
+async def notify_welcome(user: dict, password: str) -> bool:
+    """Send onboarding email with login credentials + API key."""
+    if not user or not user.get("email"):
+        return False
+    name = user.get("name") or "there"
+    api_key = user.get("api_key", "")
+    body = f"""
+<p>Welcome {name},</p>
+<p>Your wa.9x.design account has been created. You can now log in with the
+credentials below and start sending WhatsApp messages programmatically.</p>
+
+<table cellspacing="0" cellpadding="0" style="width:100%; margin-top:16px; border:1px solid #e5e5e5; border-collapse:collapse;">
+  <tr>
+    <td style="padding:10px 14px; background:#fafafa; border-bottom:1px solid #e5e5e5; font-size:12px; color:#666; width:34%;">Email</td>
+    <td style="padding:10px 14px; border-bottom:1px solid #e5e5e5; font-family:ui-monospace,Menlo,monospace; font-size:13px;">{user['email']}</td>
+  </tr>
+  <tr>
+    <td style="padding:10px 14px; background:#fafafa; border-bottom:1px solid #e5e5e5; font-size:12px; color:#666;">Initial password</td>
+    <td style="padding:10px 14px; border-bottom:1px solid #e5e5e5; font-family:ui-monospace,Menlo,monospace; font-size:13px;">{password}</td>
+  </tr>
+  <tr>
+    <td style="padding:10px 14px; background:#fafafa; font-size:12px; color:#666;">API key</td>
+    <td style="padding:10px 14px; font-family:ui-monospace,Menlo,monospace; font-size:12px; word-break:break-all;">{api_key}</td>
+  </tr>
+</table>
+
+<p style="margin-top:18px;"><strong>Next steps:</strong></p>
+<ol style="padding-left:20px; margin:8px 0;">
+  <li>Log in and change your password from <em>Settings → Credentials</em>.</li>
+  <li>Connect a WhatsApp number from <em>Services → New service</em>.</li>
+  <li>Use your API key in your application — see the <em>API Docs</em> page.</li>
+</ol>
+<p style="font-size:12px; color:#666;">Keep this email private — it contains
+credentials needed to access your account.</p>
+"""
+    html = _wrap(
+        title="Welcome to wa.9x.design",
+        body_html=body,
+        cta_url=f"{_frontend_url()}/login",
+        cta_label="Log in to dashboard",
+    )
+    return await send_email(user["email"], "[wa.9x.design] Welcome — your account is ready", html)
+
+
+async def notify_api_key_changed(
+    user: dict, new_api_key: str, *, by_admin: bool = False
+) -> bool:
+    """Security alert when an API key is rotated."""
+    if not user or not user.get("email"):
+        return False
+    name = user.get("name") or "there"
+    actor = "your administrator" if by_admin else "you"
+    body = f"""
+<p>Hi {name},</p>
+<p>Your wa.9x.design API key was just rotated by <strong>{actor}</strong>. Any
+existing integrations using the previous key will stop working immediately.</p>
+
+<p style="margin-top:18px;">Your new API key:</p>
+<code style="display:block; padding:12px 14px; background:#fafafa; border:1px solid #e5e5e5; font-family:ui-monospace,Menlo,monospace; font-size:12px; word-break:break-all;">{new_api_key}</code>
+
+<p style="margin-top:18px; font-size:13px; color:#b91c1c;">
+If you didn't request this change, log in and rotate your key again immediately,
+then contact support.
+</p>
+"""
+    html = _wrap(
+        title="Your API key was rotated",
+        body_html=body,
+        cta_url=f"{_frontend_url()}/app/settings",
+        cta_label="View settings",
+    )
+    return await send_email(user["email"], "[wa.9x.design] API key rotated", html)
+
+
 # ---------------- Fire-and-forget wrappers ----------------
 def schedule(coro):
     """Schedule a coroutine without awaiting (use inside async or sync code)."""

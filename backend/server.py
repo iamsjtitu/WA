@@ -356,6 +356,7 @@ async def register(payload: RegisterIn, response: Response):
 
     user_doc.pop("password_hash", None)
     user_doc.pop("_id", None)
+    asyncio.create_task(email_service.notify_welcome(user_doc, payload.password))
     return user_to_out(user_doc)
 
 
@@ -456,6 +457,7 @@ async def create_customer(payload: CustomerCreateIn, _: dict = Depends(admin_onl
     await db.users.insert_one(doc)
     doc.pop("password_hash", None)
     doc.pop("_id", None)
+    asyncio.create_task(email_service.notify_welcome(doc, payload.password))
     return user_to_out(doc)
 
 
@@ -503,6 +505,12 @@ async def regen_key(customer_id: str, _: dict = Depends(admin_only)):
         raise HTTPException(status_code=404, detail="Customer not found")
     new_key = gen_api_key()
     await db.users.update_one({"id": customer_id}, {"$set": {"api_key": new_key}})
+    refreshed = await db.users.find_one(
+        {"id": customer_id}, {"_id": 0, "password_hash": 0}
+    )
+    asyncio.create_task(
+        email_service.notify_api_key_changed(refreshed, new_key, by_admin=True)
+    )
     return {"api_key": new_key}
 
 
@@ -662,6 +670,12 @@ async def admin_stats(_: dict = Depends(admin_only)):
 async def regen_my_key(user: dict = Depends(current_user)):
     new_key = gen_api_key()
     await db.users.update_one({"id": user["id"]}, {"$set": {"api_key": new_key}})
+    refreshed = await db.users.find_one(
+        {"id": user["id"]}, {"_id": 0, "password_hash": 0}
+    )
+    asyncio.create_task(
+        email_service.notify_api_key_changed(refreshed, new_key, by_admin=False)
+    )
     return {"api_key": new_key}
 
 
