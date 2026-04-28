@@ -39,6 +39,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 import auth as auth_mod
 import billing as billing_mod
+import system_admin
 import v2_compat
 import wa_client
 import wa_supervisor
