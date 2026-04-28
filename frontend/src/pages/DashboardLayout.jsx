@@ -14,6 +14,7 @@ import {
   PaperPlane,
   Tag,
   CreditCard,
+  Wrench,
 } from "@phosphor-icons/react";
 
 export default function DashboardLayout() {
@@ -38,6 +39,7 @@ export default function DashboardLayout() {
       ? [
           { to: "/app/customers", label: "Customers", icon: Users, key: "customers" },
           { to: "/app/plans", label: "Plans", icon: Tag, key: "plans" },
+          { to: "/app/system", label: "System", icon: Wrench, key: "system" },
         ]
       : [{ to: "/app/billing", label: "Billing", icon: CreditCard, key: "billing" }]),
     { to: "/app/settings", label: "Settings", icon: Gear, key: "settings" },

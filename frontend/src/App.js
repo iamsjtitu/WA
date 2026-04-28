@@ -15,6 +15,7 @@ import MessageLogs from "./pages/MessageLogs";
 import ApiDocs from "./pages/ApiDocs";
 import Customers from "./pages/Customers";
 import AdminPlans from "./pages/AdminPlans";
+import AdminSystem from "./pages/AdminSystem";
 import Billing from "./pages/Billing";
 import Settings from "./pages/Settings";
 import { Toaster } from "sonner";
@@ -74,6 +75,7 @@ function App() {
               <Route path="docs" element={<ApiDocs />} />
               <Route path="customers" element={<Customers />} />
               <Route path="plans" element={<AdminPlans />} />
+              <Route path="system" element={<AdminSystem />} />
               <Route path="billing" element={<Billing />} />
               <Route path="settings" element={<Settings />} />
             </Route>

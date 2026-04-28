@@ -1394,6 +1394,8 @@ app.include_router(
     v2_compat.make_router(db, wa_client, fire_webhook, _send_one, _send_media_one, _enforce_quota),
     prefix="/api",
 )
+# Admin: system auto-update from GitHub
+app.include_router(system_admin.make_router(admin_only), prefix="/api")
 
 
 # ---------------- Scheduled message dispatcher ----------------
