@@ -245,18 +245,22 @@ export default function Sessions() {
   );
 }
 
+import { createPortal } from "react-dom";
+
 export function Modal({ children, title, onClose }) {
-  return (
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" data-testid="modal-backdrop">
-      <div className="bg-white sharp w-full max-w-md border border-neutral-200 shadow-xl">
-        <div className="flex items-center justify-between px-5 h-12 border-b border-neutral-200">
+      <div className="bg-white sharp w-full max-w-md border border-neutral-200 shadow-xl flex flex-col max-h-[calc(100vh-2rem)]">
+        <div className="flex items-center justify-between px-5 h-12 border-b border-neutral-200 shrink-0">
           <h3 className="font-display font-semibold tracking-tight">{title}</h3>
           <button onClick={onClose} className="p-1 hover:bg-neutral-100 sharp" data-testid="modal-close">
             <X size={16} />
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="p-5 overflow-y-auto">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
