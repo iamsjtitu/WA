@@ -38,7 +38,7 @@ export default function Register() {
           <h1 className="font-display text-3xl tracking-tight">Create your account</h1>
           <p className="text-neutral-600 text-sm mt-2">
             Already have one?{" "}
-            <Link to="/login" className="text-[#002FA7] underline" data-testid="link-to-login">
+            <Link to="/login" className="text-[#1FA855] underline" data-testid="link-to-login">
               Sign in
             </Link>
           </p>
@@ -72,10 +72,10 @@ export default function Register() {
       <div className="hidden lg:flex relative bg-[#0A0A0A] text-white p-12 flex-col justify-between overflow-hidden order-1 lg:order-2">
         <div className="absolute inset-0 grid-bg-dark opacity-60 pointer-events-none" />
         <Link to="/" className="flex items-center gap-2 relative">
-          <div className="w-8 h-8 bg-[#002FA7] flex items-center justify-center sharp">
+          <div className="w-8 h-8 bg-[#1FA855] flex items-center justify-center sharp">
             <ChatCircle weight="fill" size={18} color="#fff" />
           </div>
-          <span className="font-display font-bold text-lg">WapiHub</span>
+          <span className="font-display font-bold text-lg">wa.9x.design</span>
         </Link>
         <div className="relative">
           <p className="font-mono text-xs uppercase tracking-widest text-[#EDFF00]">— join the hub</p>
@@ -86,7 +86,7 @@ export default function Register() {
             No business verification, no template approvals. Link a number, grab a key, send.
           </p>
         </div>
-        <p className="font-mono text-xs text-neutral-500 relative">© {new Date().getFullYear()} WapiHub</p>
+        <p className="font-mono text-xs text-neutral-500 relative">© {new Date().getFullYear()} wa.9x.design</p>
       </div>
     </div>
   );
@@ -104,7 +104,7 @@ function Field({ label, value, onChange, type = "text", placeholder, autoComplet
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         autoComplete={autoComplete}
-        className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7]"
+        className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855]"
       />
     </div>
   );

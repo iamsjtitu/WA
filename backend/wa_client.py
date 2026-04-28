@@ -66,6 +66,21 @@ async def send_group(
         return r.json()
 
 
+async def request_pairing_code(session_id: str, phone: str) -> dict:
+    async with _client() as c:
+        r = await c.post(
+            f"/sessions/{session_id}/pair",
+            json={"phone": phone},
+        )
+        if r.status_code >= 400:
+            try:
+                detail = r.json().get("error", "pair failed")
+            except Exception:
+                detail = "pair failed"
+            raise RuntimeError(detail)
+        return r.json()
+
+
 async def send_media(
     session_id: str,
     to: str,

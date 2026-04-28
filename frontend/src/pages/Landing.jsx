@@ -21,10 +21,10 @@ export default function Landing() {
       >
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2" data-testid="brand-link">
-            <div className="w-8 h-8 bg-[#002FA7] flex items-center justify-center sharp">
+            <div className="w-8 h-8 bg-[#1FA855] flex items-center justify-center sharp">
               <ChatCircle weight="fill" size={18} color="#fff" />
             </div>
-            <span className="font-display font-bold text-lg tracking-tight">WapiHub</span>
+            <span className="font-display font-bold text-lg tracking-tight">wa.9x.design</span>
             <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-500 ml-1 border border-neutral-200 px-1.5 py-0.5">
               api
             </span>
@@ -74,7 +74,7 @@ export default function Landing() {
               transition={{ duration: 0.5, delay: 0.15 }}
               className="text-lg text-neutral-600 mt-6 max-w-xl"
             >
-              Link any WhatsApp number, get an API key, and start sending. WapiHub gives
+              Link any WhatsApp number, get an API key, and start sending. wa.9x.design gives
               you a multi-tenant dashboard, quotas, message logs, and a clean REST endpoint —
               all under your own brand.
             </motion.p>
@@ -113,11 +113,11 @@ export default function Landing() {
                 <span className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
                 <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/70" />
                 <span className="w-2.5 h-2.5 rounded-full bg-green-500/70" />
-                <span className="ml-3">terminal — wapihub</span>
+                <span className="ml-3">terminal — wa9x</span>
               </div>
               <pre className="p-5 text-[12.5px] leading-relaxed text-neutral-200 font-mono whitespace-pre-wrap">
-{`$ curl -X POST https://your.wapihub.app/api/v1/messages \\
-   -H "X-API-Key: wapi_•••" \\
+{`$ curl -X POST https://your.wa9x.app/api/v1/messages \\
+   -H "X-API-Key: wa9x_•••" \\
    -H "Content-Type: application/json" \\
    -d '{
      "to": "919876543210",
@@ -137,7 +137,7 @@ export default function Landing() {
               transition={{ duration: 0.6, delay: 0.4 }}
               className="absolute -bottom-6 -left-6 bg-white border border-neutral-200 p-4 sharp shadow-lg hidden md:flex items-center gap-3"
             >
-              <Lightning size={20} weight="fill" color="#002FA7" />
+              <Lightning size={20} weight="fill" color="#1FA855" />
               <div>
                 <div className="font-display font-semibold text-sm">Sub-2s delivery</div>
                 <div className="text-xs text-neutral-500 font-mono">queued → sent</div>
@@ -167,7 +167,7 @@ export default function Landing() {
       <section id="features" className="border-b border-neutral-200">
         <div className="max-w-7xl mx-auto px-6 py-20">
           <div className="max-w-2xl">
-            <p className="font-mono text-xs uppercase tracking-widest text-[#002FA7]">
+            <p className="font-mono text-xs uppercase tracking-widest text-[#1FA855]">
               · Features
             </p>
             <h2 className="font-display text-4xl sm:text-5xl mt-3 tracking-tight">
@@ -223,7 +223,7 @@ export default function Landing() {
       <section id="how" className="border-b border-neutral-200 bg-neutral-50">
         <div className="max-w-7xl mx-auto px-6 py-20 grid lg:grid-cols-2 gap-12 items-start">
           <div>
-            <p className="font-mono text-xs uppercase tracking-widest text-[#002FA7]">
+            <p className="font-mono text-xs uppercase tracking-widest text-[#1FA855]">
               · 3 steps
             </p>
             <h2 className="font-display text-4xl sm:text-5xl mt-3 tracking-tight">
@@ -235,7 +235,7 @@ export default function Landing() {
           </div>
           <div className="space-y-0 border border-neutral-200 bg-white">
             <Step n="01" title="Register & link a number">
-              Create your WapiHub account and scan the QR with WhatsApp on your phone to link any number.
+              Create your wa.9x.design account and scan the QR with WhatsApp on your phone to link any number.
             </Step>
             <Step n="02" title="Grab your API key">
               Visit the dashboard, copy your <code className="font-mono text-xs px-1.5 py-0.5 bg-neutral-100 border border-neutral-200">X-API-Key</code>, and start integrating.
@@ -273,8 +273,8 @@ export default function Landing() {
             </div>
             <div className="codeblk text-[12.5px]">
 {`POST /api/v1/messages
-Host: your.wapihub.app
-X-API-Key: wapi_••••••••••••••••••
+Host: your.wa9x.app
+X-API-Key: wa9x_••••••••••••••••••
 Content-Type: application/json
 
 {
@@ -298,7 +298,7 @@ Content-Type: application/json
       <section id="pricing" className="border-b border-neutral-200">
         <div className="max-w-7xl mx-auto px-6 py-20">
           <div className="max-w-2xl">
-            <p className="font-mono text-xs uppercase tracking-widest text-[#002FA7]">
+            <p className="font-mono text-xs uppercase tracking-widest text-[#1FA855]">
               · Pricing
             </p>
             <h2 className="font-display text-4xl sm:text-5xl mt-3 tracking-tight">
@@ -348,10 +348,10 @@ Content-Type: application/json
       <footer className="bg-[#0A0A0A] text-neutral-400">
         <div className="max-w-7xl mx-auto px-6 py-10 flex flex-col md:flex-row items-center justify-between gap-4 text-sm">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-[#002FA7] flex items-center justify-center sharp">
+            <div className="w-7 h-7 bg-[#1FA855] flex items-center justify-center sharp">
               <ChatCircle weight="fill" size={14} color="#fff" />
             </div>
-            <span className="font-display font-semibold text-white">WapiHub</span>
+            <span className="font-display font-semibold text-white">wa.9x.design</span>
             <span className="font-mono text-xs ml-2">© {new Date().getFullYear()}</span>
           </div>
           <p className="font-mono text-xs">
@@ -379,7 +379,7 @@ function Feature({ icon, title, body, border, top }) {
         top ? "border-t border-neutral-200" : ""
       } hover:bg-neutral-50 transition-colors`}
     >
-      <div className="w-10 h-10 bg-[#002FA7]/10 text-[#002FA7] flex items-center justify-center sharp">
+      <div className="w-10 h-10 bg-[#1FA855]/10 text-[#1FA855] flex items-center justify-center sharp">
         {icon}
       </div>
       <h3 className="font-display font-semibold text-xl mt-5 tracking-tight">{title}</h3>
@@ -391,7 +391,7 @@ function Feature({ icon, title, body, border, top }) {
 function Step({ n, title, children }) {
   return (
     <div className="p-8 border-b border-neutral-200 last:border-b-0 flex gap-6">
-      <div className="font-mono text-sm text-[#002FA7]">{n}</div>
+      <div className="font-mono text-sm text-[#1FA855]">{n}</div>
       <div>
         <h4 className="font-display font-semibold text-lg tracking-tight">{title}</h4>
         <p className="text-neutral-600 mt-1 text-sm">{children}</p>
@@ -418,7 +418,7 @@ function Plan({ name, price, period, features, highlight, cta }) {
       <ul className={`mt-6 space-y-2 text-sm ${highlight ? "text-neutral-300" : "text-neutral-600"}`}>
         {features.map((f) => (
           <li key={f} className="flex items-start gap-2">
-            <CheckCircle size={16} weight="fill" color={highlight ? "#EDFF00" : "#002FA7"} className="mt-0.5 shrink-0" />
+            <CheckCircle size={16} weight="fill" color={highlight ? "#EDFF00" : "#1FA855"} className="mt-0.5 shrink-0" />
             {f}
           </li>
         ))}

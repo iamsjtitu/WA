@@ -1,4 +1,4 @@
-"""WapiHub backend API tests — covers auth, admin, sessions, messages, public API."""
+"""wa.9x.design backend API tests — covers auth, admin, sessions, messages, public API."""
 from __future__ import annotations
 
 import os
@@ -12,7 +12,7 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://chat-platform-380.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
-ADMIN_EMAIL = "admin@wapihub.com"
+ADMIN_EMAIL = "admin@wa.9x.design"
 ADMIN_PASSWORD = "admin123"
 
 
@@ -44,7 +44,7 @@ def customer_account() -> dict:
     assert r.status_code == 200, f"Register failed: {r.status_code} {r.text}"
     user = r.json()
     assert user["role"] == "customer"
-    assert user["api_key"].startswith("wapi_")
+    assert user["api_key"].startswith("wa9x_")
     return {"email": email, "password": password, "user": user, "session": s, "api_key": user["api_key"]}
 
 
@@ -109,7 +109,7 @@ class TestAuth:
         body = r.json()
         assert body["email"] == email.lower()
         assert body["role"] == "customer"
-        assert body["api_key"].startswith("wapi_")
+        assert body["api_key"].startswith("wa9x_")
         assert body["quota_monthly"] == 1000
         assert body["quota_used"] == 0
 
@@ -168,7 +168,7 @@ class TestAdmin:
         assert cust["email"] == email.lower()
         assert cust["role"] == "customer"
         assert cust["quota_monthly"] == 250
-        assert cust["api_key"].startswith("wapi_")
+        assert cust["api_key"].startswith("wa9x_")
         original_key = cust["api_key"]
 
         # duplicate
@@ -190,7 +190,7 @@ class TestAdmin:
         r_key = admin_session.post(f"{API}/admin/customers/{cid}/regenerate-key", timeout=10)
         assert r_key.status_code == 200
         new_key = r_key.json()["api_key"]
-        assert new_key.startswith("wapi_")
+        assert new_key.startswith("wa9x_")
         assert new_key != original_key
 
         # DELETE
@@ -224,7 +224,7 @@ class TestMe:
         r = customer_account["session"].post(f"{API}/me/regenerate-key", timeout=10)
         assert r.status_code == 200
         new_key = r.json()["api_key"]
-        assert new_key.startswith("wapi_")
+        assert new_key.startswith("wa9x_")
         assert new_key != old_key
         # Update fixture for downstream tests
         customer_account["api_key"] = new_key
@@ -318,7 +318,7 @@ class TestPublicAPI:
         r = requests.post(
             f"{API}/v1/messages",
             json={"to": "+15551234567", "text": "x"},
-            headers={"X-API-Key": "wapi_invalid_key_xxxx"},
+            headers={"X-API-Key": "wa9x_invalid_key_xxxx"},
             timeout=10,
         )
         assert r.status_code == 401

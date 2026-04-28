@@ -252,6 +252,42 @@ app.post("/sessions/:id/start", async (req, res) => {
   }
 });
 
+app.post("/sessions/:id/pair", async (req, res) => {
+  const id = req.params.id;
+  const { phone } = req.body || {};
+  if (!phone) return res.status(400).json({ error: "phone required" });
+
+  // ensure session is started
+  let m = sessions.get(id);
+  if (!m || !m.sock) {
+    try {
+      await startSession(id);
+      m = sessions.get(id);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+  // wait briefly for socket
+  for (let i = 0; i < 30 && (!m?.sock); i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    m = sessions.get(id);
+  }
+  if (!m?.sock) return res.status(500).json({ error: "socket init failed" });
+  if (m.sock.authState?.creds?.registered) {
+    return res.status(400).json({ error: "already registered" });
+  }
+  const cleanPhone = String(phone).replace(/[^0-9]/g, "");
+  try {
+    const code = await m.sock.requestPairingCode(cleanPhone);
+    m.pairingCode = code;
+    m.pairingPhone = cleanPhone;
+    sessions.set(id, m);
+    res.json({ pairing_code: code, phone: cleanPhone });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/sessions/:id/status", (req, res) => {
   const id = req.params.id;
   const m = sessions.get(id);
@@ -264,6 +300,8 @@ app.get("/sessions/:id/status", (req, res) => {
     qr: m.qrDataUrl,
     phone: m.phone || null,
     error: m.lastError || null,
+    pairing_code: m.pairingCode || null,
+    pairing_phone: m.pairingPhone || null,
   });
 });
 

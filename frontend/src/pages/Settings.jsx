@@ -97,7 +97,7 @@ export default function Settings() {
       {/* Webhook section */}
       <div className="mt-6 border border-neutral-200 sharp p-6" data-testid="webhook-section">
         <div className="flex items-center gap-2">
-          <LinkSimple size={18} weight="fill" color="#002FA7" />
+          <LinkSimple size={18} weight="fill" color="#1FA855" />
           <h3 className="font-display font-semibold text-lg tracking-tight">Inbound Webhook</h3>
         </div>
         <p className="text-sm text-neutral-600 mt-2">
@@ -143,7 +143,7 @@ export default function Settings() {
               value={webhookUrl}
               onChange={(e) => setWebhookUrl(e.target.value)}
               placeholder="https://your-app.com/whatsapp/webhook"
-              className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7] font-mono text-sm"
+              className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855] font-mono text-sm"
             />
           </div>
 

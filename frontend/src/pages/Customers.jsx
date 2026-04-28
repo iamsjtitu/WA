@@ -219,7 +219,7 @@ function Input({ label, value, onChange, type = "text", testId }) {
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7]"
+        className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855]"
       />
     </div>
   );

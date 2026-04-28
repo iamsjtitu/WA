@@ -370,7 +370,7 @@ export default function SessionDetail() {
                 value={to}
                 onChange={(e) => setTo(e.target.value)}
                 placeholder="447780000000"
-                className="w-full mt-1 border border-neutral-300 sharp px-3 py-2 outline-none focus:border-[#002FA7] font-mono text-sm"
+                className="w-full mt-1 border border-neutral-300 sharp px-3 py-2 outline-none focus:border-[#1FA855] font-mono text-sm"
               />
             </div>
             <div>
@@ -383,7 +383,7 @@ export default function SessionDetail() {
                 maxLength={1024}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                className="w-full mt-1 border border-neutral-300 sharp px-3 py-2 outline-none focus:border-[#002FA7] text-sm"
+                className="w-full mt-1 border border-neutral-300 sharp px-3 py-2 outline-none focus:border-[#1FA855] text-sm"
               />
               <p className="font-mono text-[10px] text-right text-neutral-400">{text.length}/1024</p>
             </div>
@@ -396,7 +396,7 @@ export default function SessionDetail() {
                 value={link}
                 onChange={(e) => setLink(e.target.value)}
                 placeholder="https://…"
-                className="w-full mt-1 border border-neutral-300 sharp px-3 py-2 outline-none focus:border-[#002FA7] font-mono text-sm"
+                className="w-full mt-1 border border-neutral-300 sharp px-3 py-2 outline-none focus:border-[#1FA855] font-mono text-sm"
               />
             </div>
 
@@ -404,7 +404,7 @@ export default function SessionDetail() {
               <button
                 type="button"
                 onClick={() => setShowSchedule(true)}
-                className="text-xs text-[#002FA7] inline-flex items-center gap-1 font-mono uppercase tracking-widest"
+                className="text-xs text-[#1FA855] inline-flex items-center gap-1 font-mono uppercase tracking-widest"
                 data-testid="schedule-toggle-btn"
               >
                 <Calendar size={12} /> + Schedule
@@ -420,7 +420,7 @@ export default function SessionDetail() {
                     data-testid="qsend-schedule"
                     value={scheduleAt}
                     onChange={(e) => setScheduleAt(e.target.value)}
-                    className="flex-1 border border-neutral-300 sharp px-3 py-2 outline-none focus:border-[#002FA7] text-sm"
+                    className="flex-1 border border-neutral-300 sharp px-3 py-2 outline-none focus:border-[#1FA855] text-sm"
                   />
                   <button
                     type="button"
@@ -477,7 +477,7 @@ export default function SessionDetail() {
                   updateSetting({ default_country_code: session.default_country_code || "" })
                 }
                 placeholder="91"
-                className="w-full mt-1 border border-neutral-300 sharp px-3 py-2 outline-none focus:border-[#002FA7] font-mono text-sm"
+                className="w-full mt-1 border border-neutral-300 sharp px-3 py-2 outline-none focus:border-[#1FA855] font-mono text-sm"
               />
             </div>
             <Toggle
@@ -509,7 +509,7 @@ export default function SessionDetail() {
           <h3 className="font-display font-semibold text-sm">Webhook URL</h3>
           <p className="text-xs text-neutral-600 mt-2">
             Webhook is configured globally for your account in{" "}
-            <Link to="/app/settings" className="text-[#002FA7] underline">
+            <Link to="/app/settings" className="text-[#1FA855] underline">
               Settings
             </Link>
             . When this number receives a message, we POST it there with HMAC signature.
@@ -624,7 +624,7 @@ function Toggle({ label, hint, checked, onChange, testId }) {
         type="button"
         onClick={() => onChange(!checked)}
         className={`relative inline-flex h-6 w-11 shrink-0 sharp transition-colors ${
-          checked ? "bg-[#002FA7]" : "bg-neutral-300"
+          checked ? "bg-[#1FA855]" : "bg-neutral-300"
         }`}
         data-testid={testId}
       >

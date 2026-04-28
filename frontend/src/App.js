@@ -8,6 +8,7 @@ import DashboardLayout from "./pages/DashboardLayout";
 import Overview from "./pages/Overview";
 import Sessions from "./pages/Sessions";
 import SessionDetail from "./pages/SessionDetail";
+import ServiceCreate from "./pages/ServiceCreate";
 import SendMessage from "./pages/SendMessage";
 import BulkSend from "./pages/BulkSend";
 import MessageLogs from "./pages/MessageLogs";
@@ -65,6 +66,7 @@ function App() {
             <Route path="/app" element={<DashboardLayout />}>
               <Route index element={<Overview />} />
               <Route path="sessions" element={<Sessions />} />
+              <Route path="sessions/new" element={<ServiceCreate />} />
               <Route path="sessions/:id" element={<SessionDetail />} />
               <Route path="send" element={<SendMessage />} />
               <Route path="bulk" element={<BulkSend />} />

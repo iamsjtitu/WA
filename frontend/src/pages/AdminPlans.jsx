@@ -244,7 +244,7 @@ function PlanFormModal({ initial, isNew, onClose, onSaved }) {
                 e.key === "Enter" && (e.preventDefault(), addFeature())
               }
               placeholder="Add a feature and press Enter"
-              className="flex-1 border border-neutral-300 sharp px-3 py-2 text-sm outline-none focus:border-[#002FA7]"
+              className="flex-1 border border-neutral-300 sharp px-3 py-2 text-sm outline-none focus:border-[#1FA855]"
             />
             <button type="button" onClick={addFeature} className="btn-ghost text-sm">
               Add
@@ -306,7 +306,7 @@ function Input({ label, value, onChange, ...rest }) {
         {...rest}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2 text-sm outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7]"
+        className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2 text-sm outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855]"
       />
     </div>
   );

@@ -18,8 +18,8 @@
     --border: 220 13% 91%;
     --border-strong: 220 9% 80%;
 
-    --brand: 224 100% 33%;
-    --brand-hover: 224 100% 27%;
+    --brand: 152 67% 41%;
+    --brand-hover: 152 67% 33%;
     --accent: 65 100% 50%;
 
     --success: 158 64% 40%;
@@ -46,7 +46,7 @@
     --ring: var(--brand);
     --radius: 4px;
 
-    --chart-1: 224 100% 33%;
+    --chart-1: 152 67% 41%;
     --chart-2: 158 64% 40%;
     --chart-3: 38 92% 50%;
     --chart-4: 0 84% 60%;

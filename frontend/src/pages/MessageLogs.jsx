@@ -52,7 +52,7 @@ export default function MessageLogs() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search recipient, sender, or text…"
-          className="border border-neutral-300 sharp px-3 py-2 outline-none focus:border-[#002FA7] text-sm w-72"
+          className="border border-neutral-300 sharp px-3 py-2 outline-none focus:border-[#1FA855] text-sm w-72"
         />
         <div className="flex gap-1">
           {DIRECTIONS.map((d) => (
@@ -61,7 +61,7 @@ export default function MessageLogs() {
               onClick={() => setDirection(d)}
               className={`px-3 py-2 sharp text-xs font-mono uppercase tracking-widest border ${
                 direction === d
-                  ? "border-[#002FA7] text-[#002FA7] bg-[#002FA7]/5"
+                  ? "border-[#1FA855] text-[#1FA855] bg-[#1FA855]/5"
                   : "border-neutral-200 text-neutral-600 hover:border-neutral-400"
               }`}
               data-testid={`logs-direction-${d || "any"}`}
@@ -77,7 +77,7 @@ export default function MessageLogs() {
               onClick={() => setFilter(s)}
               className={`px-3 py-2 sharp text-xs font-mono uppercase tracking-widest border ${
                 filter === s
-                  ? "border-[#002FA7] text-[#002FA7] bg-[#002FA7]/5"
+                  ? "border-[#1FA855] text-[#1FA855] bg-[#1FA855]/5"
                   : "border-neutral-200 text-neutral-600 hover:border-neutral-400"
               }`}
               data-testid={`logs-filter-${s || "all"}`}

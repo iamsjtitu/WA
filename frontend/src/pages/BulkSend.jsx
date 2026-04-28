@@ -126,7 +126,7 @@ export default function BulkSend() {
               data-testid="bulk-session-select"
               value={sessionId}
               onChange={(e) => setSessionId(e.target.value)}
-              className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7] bg-white"
+              className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855] bg-white"
               required
             >
               <option value="">Select session…</option>
@@ -149,7 +149,7 @@ export default function BulkSend() {
                 value={recipientsRaw}
                 onChange={(e) => setRecipientsRaw(e.target.value)}
                 placeholder={"919876543210\n919812345678\n919998877665"}
-                className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7] font-mono text-sm"
+                className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855] font-mono text-sm"
               />
               <p className="text-xs font-mono text-neutral-500 mt-1">
                 {recipients.length} valid numbers detected
@@ -163,7 +163,7 @@ export default function BulkSend() {
                 </label>
                 <div className="mt-1.5">
                   <label
-                    className="border border-dashed border-neutral-300 sharp px-4 py-6 flex flex-col items-center justify-center cursor-pointer hover:border-[#002FA7] hover:bg-blue-50/30 transition-colors"
+                    className="border border-dashed border-neutral-300 sharp px-4 py-6 flex flex-col items-center justify-center cursor-pointer hover:border-[#1FA855] hover:bg-blue-50/30 transition-colors"
                     data-testid="csv-drop-area"
                   >
                     <FileCsv size={22} className="text-neutral-400" />
@@ -214,7 +214,7 @@ export default function BulkSend() {
                   ? "Hi {{name}}, your order {{order_id}} ships tomorrow."
                   : "Your message here"
               }
-              className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7]"
+              className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855]"
             />
           </div>
 
@@ -302,7 +302,7 @@ function Tab({ active, onClick, children, testId, icon }) {
       data-testid={testId}
       className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors inline-flex items-center gap-2 ${
         active
-          ? "border-[#002FA7] text-[#002FA7]"
+          ? "border-[#1FA855] text-[#1FA855]"
           : "border-transparent text-neutral-600 hover:text-neutral-900"
       }`}
     >

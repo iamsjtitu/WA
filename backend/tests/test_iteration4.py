@@ -1,4 +1,4 @@
-"""Iteration 4 backend tests: 360messenger v2 API compat, scheduler,
+"""Iteration 4 backend tests: wa.9x.design v2 API compat, scheduler,
 per-session settings, group send, plugin downloads."""
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ BASE_URL = os.environ.get(
 ).rstrip("/")
 API = f"{BASE_URL}/api"
 
-ADMIN_EMAIL = "admin@wapihub.com"
+ADMIN_EMAIL = "admin@wa.9x.design"
 ADMIN_PASSWORD = "admin123"
 
 
@@ -34,7 +34,7 @@ def _read_env(key: str, default: str = "") -> str:
 
 
 MONGO_URL = _read_env("MONGO_URL", "mongodb://localhost:27017")
-DB_NAME = _read_env("DB_NAME", "wapihub_db")
+DB_NAME = _read_env("DB_NAME", "wa9x_db")
 
 
 # ---------------- Fixtures ----------------
@@ -99,7 +99,7 @@ class TestV2Auth:
         r = requests.post(
             f"{API}/v2/sendMessage",
             data={"phonenumber": "1234567", "text": "hi"},
-            headers={"Authorization": "Bearer wapi_invalid_xxx"},
+            headers={"Authorization": "Bearer wa9x_invalid_xxx"},
             timeout=10,
         )
         assert r.status_code == 401
@@ -124,7 +124,7 @@ class TestV2Auth:
         r = requests.post(
             f"{API}/v2/sendGroup",
             data={"groupId": "abc", "text": "hi"},
-            headers={"Authorization": "Bearer wapi_invalid_xxx"},
+            headers={"Authorization": "Bearer wa9x_invalid_xxx"},
             timeout=10,
         )
         assert r.status_code == 401

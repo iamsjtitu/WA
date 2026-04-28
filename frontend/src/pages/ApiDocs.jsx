@@ -67,12 +67,12 @@ export default function ApiDocs() {
       <section className="mt-8">
         <h2 className="font-display text-2xl tracking-tight">Authentication</h2>
         <p className="text-sm text-neutral-600 mt-2">Send your API key in the <span className="kbd">X-API-Key</span> header.</p>
-        <div className="mt-3">{code("auth", `X-API-Key: ${user?.api_key || "wapi_•••"}`)}</div>
+        <div className="mt-3">{code("auth", `X-API-Key: ${user?.api_key || "wa9x_•••"}`)}</div>
       </section>
 
       <section className="mt-8">
         <h2 className="font-display text-2xl tracking-tight">Send a message</h2>
-        <p className="font-mono text-xs uppercase tracking-widest text-[#002FA7] mt-2">
+        <p className="font-mono text-xs uppercase tracking-widest text-[#1FA855] mt-2">
           POST /api/v1/messages
         </p>
 
@@ -80,11 +80,11 @@ export default function ApiDocs() {
         {code(
           "curl",
           `curl -X POST ${apiBase}/v1/messages \\
-  -H "X-API-Key: ${user?.api_key || "wapi_•••"}" \\
+  -H "X-API-Key: ${user?.api_key || "wa9x_•••"}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "to": "919876543210",
-    "text": "Hello from WapiHub!"
+    "text": "Hello from wa.9x.design!"
   }'`
         )}
 
@@ -95,7 +95,7 @@ export default function ApiDocs() {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
-    "X-API-Key": "${user?.api_key || "wapi_•••"}"
+    "X-API-Key": "${user?.api_key || "wa9x_•••"}"
   },
   body: JSON.stringify({ to: "919876543210", text: "Hi!" })
 });
@@ -108,7 +108,7 @@ console.log(await res.json());`
           `import requests
 r = requests.post(
     "${apiBase}/v1/messages",
-    headers={"X-API-Key": "${user?.api_key || "wapi_•••"}"},
+    headers={"X-API-Key": "${user?.api_key || "wa9x_•••"}"},
     json={"to": "919876543210", "text": "Hi!"},
 )
 print(r.json())`
@@ -124,7 +124,7 @@ curl_setopt_array($ch, [
   CURLOPT_POST => true,
   CURLOPT_HTTPHEADER => [
     "Content-Type: application/json",
-    "X-API-Key: ${user?.api_key || "wapi_•••"}"
+    "X-API-Key: ${user?.api_key || "wa9x_•••"}"
   ],
   CURLOPT_POSTFIELDS => json_encode([
     "to" => "919876543210",
@@ -137,18 +137,18 @@ echo curl_exec($ch);`
 
       <section className="mt-10">
         <h2 className="font-display text-2xl tracking-tight">List sessions</h2>
-        <p className="font-mono text-xs uppercase tracking-widest text-[#002FA7] mt-2">
+        <p className="font-mono text-xs uppercase tracking-widest text-[#1FA855] mt-2">
           GET /api/v1/sessions
         </p>
         {code(
           "list-sessions",
-          `curl -H "X-API-Key: ${user?.api_key || "wapi_•••"}" ${apiBase}/v1/sessions`
+          `curl -H "X-API-Key: ${user?.api_key || "wa9x_•••"}" ${apiBase}/v1/sessions`
         )}
       </section>
 
       <section className="mt-10">
         <h2 className="font-display text-2xl tracking-tight">Send media (image · pdf · video)</h2>
-        <p className="font-mono text-xs uppercase tracking-widest text-[#002FA7] mt-2">
+        <p className="font-mono text-xs uppercase tracking-widest text-[#1FA855] mt-2">
           POST /api/v1/messages — with media_url
         </p>
         <p className="text-sm text-neutral-600 mt-3">
@@ -159,7 +159,7 @@ echo curl_exec($ch);`
         {code(
           "media-image",
           `curl -X POST ${apiBase}/v1/messages \\
-  -H "X-API-Key: ${user?.api_key || "wapi_•••"}" \\
+  -H "X-API-Key: ${user?.api_key || "wa9x_•••"}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "to": "919876543210",
@@ -172,7 +172,7 @@ echo curl_exec($ch);`
         {code(
           "media-pdf",
           `curl -X POST ${apiBase}/v1/messages \\
-  -H "X-API-Key: ${user?.api_key || "wapi_•••"}" \\
+  -H "X-API-Key: ${user?.api_key || "wa9x_•••"}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "to": "919876543210",
@@ -184,18 +184,18 @@ echo curl_exec($ch);`
       </section>
 
       <section className="mt-10 border-t border-neutral-200 pt-10">
-        <h2 className="font-display text-2xl tracking-tight">v2 (360messenger-compatible)</h2>
+        <h2 className="font-display text-2xl tracking-tight">v2 (wa.9x.designpatible)</h2>
         <p className="text-sm text-neutral-600 mt-2 max-w-3xl">
           Drop-in compatible with{" "}
-          <code className="kbd">api.360messenger.com/v2/*</code>. Bearer auth, multipart bodies, identical
-          response shapes — switch from 360messenger by just changing the host.
+          <code className="kbd">api.wa.9x.design/v2/*</code>. Bearer auth, multipart bodies, identical
+          response shapes — switch from wa.9x.design by just changing the host.
         </p>
 
         <h3 className="font-display font-semibold mt-5">POST /api/v2/sendMessage</h3>
         {code(
           "v2-send",
           `curl -X POST ${apiBase}/v2/sendMessage \\
-  -H "Authorization: Bearer ${user?.api_key || "wapi_•••"}" \\
+  -H "Authorization: Bearer ${user?.api_key || "wa9x_•••"}" \\
   --form 'phonenumber="447488888888"' \\
   --form 'text="Hello World!"' \\
   --form 'url="https://example.com/photo.jpg"' \\
@@ -206,7 +206,7 @@ echo curl_exec($ch);`
         {code(
           "v2-group",
           `curl -X POST ${apiBase}/v2/sendGroup \\
-  -H "Authorization: Bearer ${user?.api_key || "wapi_•••"}" \\
+  -H "Authorization: Bearer ${user?.api_key || "wa9x_•••"}" \\
   --form 'groupId="120363012345678901"' \\
   --form 'text="Hello group!"'`
         )}
@@ -215,28 +215,28 @@ echo curl_exec($ch);`
         {code(
           "v2-status",
           `curl "${apiBase}/v2/message/status?id=<msg-uuid>" \\
-  -H "Authorization: Bearer ${user?.api_key || "wapi_•••"}"`
+  -H "Authorization: Bearer ${user?.api_key || "wa9x_•••"}"`
         )}
 
         <h3 className="font-display font-semibold mt-5">GET /api/v2/message/sentMessages</h3>
         {code(
           "v2-sent",
           `curl "${apiBase}/v2/message/sentMessages?page=1" \\
-  -H "Authorization: Bearer ${user?.api_key || "wapi_•••"}"`
+  -H "Authorization: Bearer ${user?.api_key || "wa9x_•••"}"`
         )}
 
         <h3 className="font-display font-semibold mt-5">GET /api/v2/message/receivedMessages</h3>
         {code(
           "v2-received",
           `curl "${apiBase}/v2/message/receivedMessages?page=1" \\
-  -H "Authorization: Bearer ${user?.api_key || "wapi_•••"}"`
+  -H "Authorization: Bearer ${user?.api_key || "wa9x_•••"}"`
         )}
       </section>
 
       <section className="mt-10 border-t border-neutral-200 pt-10">
         <h2 className="font-display text-2xl tracking-tight">Inbound webhook</h2>
         <p className="text-sm text-neutral-600 mt-3 max-w-3xl">
-          Set a webhook URL in <a href="/app/settings" className="text-[#002FA7] underline">Settings</a>.
+          Set a webhook URL in <a href="/app/settings" className="text-[#1FA855] underline">Settings</a>.
           When a connected number receives a message, we'll POST a signed JSON payload to your endpoint.
           Verify the <span className="kbd">X-Wapihub-Signature</span> header before trusting the body.
         </p>
@@ -271,7 +271,7 @@ app.post("/whatsapp/webhook", express.json(), (req, res) => {
   const expected =
     "sha256=" +
     crypto
-      .createHmac("sha256", process.env.WAPIHUB_WEBHOOK_SECRET)
+      .createHmac("sha256", process.env.WA9X_WEBHOOK_SECRET)
       .update(JSON.stringify(req.body))
       .digest("hex");
 
@@ -294,7 +294,7 @@ app = FastAPI()
 @app.post("/whatsapp/webhook")
 async def webhook(request: Request):
     body = await request.body()
-    sig = request.headers.get("x-wapihub-signature", "")
+    sig = request.headers.get("x-wa9x-signature", "")
     expected = "sha256=" + hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected):
         raise HTTPException(401, "bad signature")
@@ -315,13 +315,13 @@ async def webhook(request: Request):
             className="border border-neutral-200 sharp p-5 hover:bg-neutral-50 transition-colors flex items-start gap-3"
             data-testid="download-whmcs"
           >
-            <div className="w-10 h-10 bg-[#002FA7]/10 text-[#002FA7] flex items-center justify-center sharp font-display font-bold">W</div>
+            <div className="w-10 h-10 bg-[#1FA855]/10 text-[#1FA855] flex items-center justify-center sharp font-display font-bold">W</div>
             <div>
               <h3 className="font-display font-semibold">WHMCS Module</h3>
               <p className="text-xs text-neutral-600 mt-1">
                 Send WhatsApp from invoice events, ticket replies, signups. PHP curl helper included.
               </p>
-              <span className="font-mono text-[11px] uppercase tracking-widest text-[#002FA7] mt-2 inline-block">
+              <span className="font-mono text-[11px] uppercase tracking-widest text-[#1FA855] mt-2 inline-block">
                 ↓ download .zip
               </span>
             </div>
@@ -337,7 +337,7 @@ async def webhook(request: Request):
               <p className="text-xs text-neutral-600 mt-1">
                 Auto-WhatsApp on order paid / processing with templates. Settings under WP → Options.
               </p>
-              <span className="font-mono text-[11px] uppercase tracking-widest text-[#002FA7] mt-2 inline-block">
+              <span className="font-mono text-[11px] uppercase tracking-widest text-[#1FA855] mt-2 inline-block">
                 ↓ download .zip
               </span>
             </div>

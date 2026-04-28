@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: WapiHub WhatsApp for WooCommerce
- * Description: Sends WhatsApp notifications via WapiHub on order events.
+ * Plugin Name: wa.9x.design WhatsApp for WooCommerce
+ * Description: Sends WhatsApp notifications via wa.9x.design on order events.
  * Version: 1.0.0
- * Author: WapiHub
+ * Author: wa.9x.design
  */
 
 if (!defined("ABSPATH")) {
@@ -13,43 +13,43 @@ if (!defined("ABSPATH")) {
 // ---- Settings page ----
 add_action("admin_menu", function () {
     add_options_page(
-        "WapiHub",
-        "WapiHub",
+        "wa.9x.design",
+        "wa.9x.design",
         "manage_options",
-        "wapihub",
-        "wapihub_settings_page"
+        "wa9x",
+        "wa9x_settings_page"
     );
 });
 
 add_action("admin_init", function () {
-    register_setting("wapihub", "wapihub_api_base");
-    register_setting("wapihub", "wapihub_api_key");
-    register_setting("wapihub", "wapihub_template_paid");
-    register_setting("wapihub", "wapihub_template_processing");
+    register_setting("wa9x", "wa9x_api_base");
+    register_setting("wa9x", "wa9x_api_key");
+    register_setting("wa9x", "wa9x_template_paid");
+    register_setting("wa9x", "wa9x_template_processing");
 });
 
-function wapihub_settings_page()
+function wa9x_settings_page()
 {
     ?>
     <div class="wrap">
-        <h1>WapiHub WhatsApp</h1>
+        <h1>wa.9x.design WhatsApp</h1>
         <form method="post" action="options.php">
-            <?php settings_fields("wapihub"); ?>
+            <?php settings_fields("wa9x"); ?>
             <table class="form-table">
                 <tr><th>API Base URL</th>
-                    <td><input type="text" name="wapihub_api_base" size="60"
-                        value="<?php echo esc_attr(get_option("wapihub_api_base")); ?>"
-                        placeholder="https://your-wapihub.example.com/api" /></td></tr>
+                    <td><input type="text" name="wa9x_api_base" size="60"
+                        value="<?php echo esc_attr(get_option("wa9x_api_base")); ?>"
+                        placeholder="https://your-wa9x.example.com/api" /></td></tr>
                 <tr><th>API Key</th>
-                    <td><input type="password" name="wapihub_api_key" size="60"
-                        value="<?php echo esc_attr(get_option("wapihub_api_key")); ?>" /></td></tr>
+                    <td><input type="password" name="wa9x_api_key" size="60"
+                        value="<?php echo esc_attr(get_option("wa9x_api_key")); ?>" /></td></tr>
                 <tr><th>Order Paid Template</th>
-                    <td><textarea name="wapihub_template_paid" rows="3" cols="60">
-<?php echo esc_textarea(get_option("wapihub_template_paid", "Hi {{name}}, your order #{{order_id}} has been paid. Thank you!")); ?>
+                    <td><textarea name="wa9x_template_paid" rows="3" cols="60">
+<?php echo esc_textarea(get_option("wa9x_template_paid", "Hi {{name}}, your order #{{order_id}} has been paid. Thank you!")); ?>
                     </textarea></td></tr>
                 <tr><th>Processing Template</th>
-                    <td><textarea name="wapihub_template_processing" rows="3" cols="60">
-<?php echo esc_textarea(get_option("wapihub_template_processing", "Hi {{name}}, we're preparing order #{{order_id}}.")); ?>
+                    <td><textarea name="wa9x_template_processing" rows="3" cols="60">
+<?php echo esc_textarea(get_option("wa9x_template_processing", "Hi {{name}}, we're preparing order #{{order_id}}.")); ?>
                     </textarea></td></tr>
             </table>
             <?php submit_button(); ?>
@@ -59,10 +59,10 @@ function wapihub_settings_page()
 }
 
 // ---- Helper ----
-function wapihub_send($phone, $text, $url = null)
+function wa9x_send($phone, $text, $url = null)
 {
-    $api_base = rtrim(get_option("wapihub_api_base"), "/");
-    $api_key = get_option("wapihub_api_key");
+    $api_base = rtrim(get_option("wa9x_api_base"), "/");
+    $api_key = get_option("wa9x_api_key");
     if (!$api_base || !$api_key) return false;
 
     $body = ["phonenumber" => $phone, "text" => $text];
@@ -77,7 +77,7 @@ function wapihub_send($phone, $text, $url = null)
     ]);
 }
 
-function wapihub_render($template, $vars)
+function wa9x_render($template, $vars)
 {
     foreach ($vars as $k => $v) {
         $template = str_replace("{{" . $k . "}}", (string) $v, $template);
@@ -91,15 +91,15 @@ add_action("woocommerce_order_status_completed", function ($order_id) {
     if (!$order) return;
     $phone = preg_replace("/[^0-9]/", "", $order->get_billing_phone());
     if (!$phone) return;
-    $text = wapihub_render(
-        get_option("wapihub_template_paid", "Order #{{order_id}} completed."),
+    $text = wa9x_render(
+        get_option("wa9x_template_paid", "Order #{{order_id}} completed."),
         [
             "name" => $order->get_billing_first_name(),
             "order_id" => $order_id,
             "total" => $order->get_total(),
         ]
     );
-    wapihub_send($phone, $text);
+    wa9x_send($phone, $text);
 });
 
 add_action("woocommerce_order_status_processing", function ($order_id) {
@@ -107,13 +107,13 @@ add_action("woocommerce_order_status_processing", function ($order_id) {
     if (!$order) return;
     $phone = preg_replace("/[^0-9]/", "", $order->get_billing_phone());
     if (!$phone) return;
-    $text = wapihub_render(
-        get_option("wapihub_template_processing", "Order #{{order_id}} received."),
+    $text = wa9x_render(
+        get_option("wa9x_template_processing", "Order #{{order_id}} received."),
         [
             "name" => $order->get_billing_first_name(),
             "order_id" => $order_id,
             "total" => $order->get_total(),
         ]
     );
-    wapihub_send($phone, $text);
+    wa9x_send($phone, $text);
 });

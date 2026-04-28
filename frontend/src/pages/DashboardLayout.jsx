@@ -28,7 +28,7 @@ export default function DashboardLayout() {
 
   const items = [
     { to: "/app", label: "Overview", icon: Gauge, end: true, key: "overview" },
-    { to: "/app/sessions", label: "WhatsApp Sessions", icon: Plugs, key: "sessions" },
+    { to: "/app/sessions", label: "Services", icon: Plugs, key: "sessions" },
     { to: "/app/send", label: "Send Message", icon: PaperPlaneTilt, key: "send" },
     { to: "/app/bulk", label: "Bulk Campaign", icon: PaperPlane, key: "bulk" },
     { to: "/app/logs", label: "Message Logs", icon: ListBullets, key: "logs" },
@@ -46,10 +46,10 @@ export default function DashboardLayout() {
     <div className="min-h-screen bg-white text-neutral-950 grid grid-cols-[260px_1fr]">
       <aside className="border-r border-neutral-200 bg-neutral-50 flex flex-col" data-testid="dashboard-sidebar">
         <Link to="/" className="px-5 h-16 border-b border-neutral-200 flex items-center gap-2" data-testid="sidebar-brand">
-          <div className="w-8 h-8 bg-[#002FA7] flex items-center justify-center sharp">
+          <div className="w-8 h-8 bg-[#1FA855] flex items-center justify-center sharp">
             <ChatCircle weight="fill" size={18} color="#fff" />
           </div>
-          <span className="font-display font-bold text-lg tracking-tight">WapiHub</span>
+          <span className="font-display font-bold text-lg tracking-tight">wa.9x.design</span>
         </Link>
 
         <nav className="px-3 py-4 flex-1 space-y-0.5">
@@ -69,7 +69,7 @@ export default function DashboardLayout() {
 
         <div className="border-t border-neutral-200 p-3">
           <div className="flex items-center gap-3 px-2 py-2">
-            <div className="w-9 h-9 bg-[#002FA7] text-white flex items-center justify-center sharp font-display font-semibold">
+            <div className="w-9 h-9 bg-[#1FA855] text-white flex items-center justify-center sharp font-display font-semibold">
               {(user?.name || "U").slice(0, 1).toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">

@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 5 backend testing — full rebrand to wa.9x.design verified. 110/111 tests pass (94 carryover regression from iter1-4 + 16 new for iter5). Verified: admin@wa.9x.design / admin123 login OK, old admin@wapihub.com → 401, /auth/me returns api_key with wa9x_ prefix, /auth/register generates wa9x_ keys, POST /api/sessions/{id}/pair endpoint exists with proper auth (401 unauth, 404 non-owner, 422 phone too short, 200/502 for owner), session creation returns correct defaults (default_country_code='', auto_prefix=False, receive_messages=True, mark_as_seen=False), v2 sendMessage Bearer 'wa9x_' auth works (no 401/403 with valid key, 401 with wapi_/invalid), /api/health returns api+wa_service ok, plugin downloads (whmcs.zip, woocommerce.zip) return 200 + application/zip + PK magic, webhook UA rebranded to 'wa.9x.design-Webhook/1.0' in source, no '360messenger' string in server.py. ONE FAILURE: GET /api/sessions/{id}/status does NOT include pairing_code/pairing_phone fields in the JSON response — the wa-service /sessions/:id/status returns these fields, but backend at server.py:597 only forwards 'qr' from live, dropping pairing_code & pairing_phone.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/sessions/{id}/status",
+        "issue": "Response is missing 'pairing_code' and 'pairing_phone' fields. wa-service returns them in /sessions/:id/status (server.js lines 303-304: pairing_code, pairing_phone), but the FastAPI handler at /app/backend/server.py line 593-597 only forwards 'qr' from live data. Fix: change 'return {**s, **update, \"qr\": live.get(\"qr\")}' to also include 'pairing_code': live.get('pairing_code'), 'pairing_phone': live.get('pairing_phone'). Per problem statement: 'GET /api/sessions/{id}/status — now includes pairing_code and pairing_phone fields (null if not yet paired)' — this is broken.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {"endpoint": "POST /api/sessions/{id}/pair", "issue": "When wa-service is reachable, this endpoint actually returns a real pairing code (Baileys requestPairingCode is called). On a session in 'qr' state with creds NOT registered, this works — but if session is in 'starting' it returns 502 with no retry. Acceptable, but consider returning 409 'session not ready, retry in 2s'."},
+      {"endpoint": "POST /api/sessions/{id}/pair", "issue": "PairIn min_length=8 — but '12345678' (just digits, no country code) would still pass. Consider validating that phone consists only of digits and is a plausible E.164 number."},
+      {"endpoint": "Iteration_4 minor issues from previous report still apply (HTTP 200 vs body statusCode=201, past-delay silent fall-through, sentMessages prefix-anchor, url= SSRF, country-code heuristic, dispatcher TTL, default_country_code empty validation) — none re-tested here as they are not in scope for iter5 but still pending main-agent action."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration5.py",
+    "/app/backend/tests/test_iteration4.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iteration5.xml"
+  ],
+  "action_items": [
+    "HIGH: Fix /api/sessions/{id}/status — add 'pairing_code': live.get('pairing_code') and 'pairing_phone': live.get('pairing_phone') to the response dict in /app/backend/server.py around line 597. Currently the wa-service emits these fields but the backend swallows them, so the frontend cannot show the pairing code after POST /pair.",
+    "Carry-forward from iter4 (still pending): return HTTP 201 from /v2/sendMessage/sendGroup schedule path; reject past delays explicitly; anchor sentMessages phonenumber filter with ^; SSRF/size guard on url= fetch; deterministic country-code prefix; dispatcher stuck-job TTL; validate PATCH /sessions/{id}/settings.default_country_code yields >=1 digit."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/server.py line 597: status response builder drops pairing fields. Single-line fix; add both keys explicitly so the contract is obvious to future maintainers.",
+    "/app/wa-service/server.js /sessions/:id/pair: catches sock.requestPairingCode errors and returns generic 500 with raw e.message — leaks internals (e.g. 'Connection Closed'). Map to a small set of stable error codes.",
+    "/app/backend/server.py PairIn: only validates min_length=8/max_length=20. No digit-only / E.164 validation. A user can submit phone='abcdefgh' and Baileys will reject it deeper, producing a 502 with cryptic error. Strip non-digits server-side and validate >=10 digits before forwarding.",
+    "/app/backend/server.py pair_session: catches generic Exception → 502. If Baileys throws 'already registered' that should be 409 not 502.",
+    "Webhook UA rebrand verified ('wa.9x.design-Webhook/1.0') — but signature header is still X-Webhook-Signature. If you want full rebrand, consider X-Wa9x-Signature with a back-compat period.",
+    "ADMIN_EMAIL is in backend/.env but ADMIN_PASSWORD is also there in plaintext. For production, rotate to a hashed seed mechanism or env-managed secrets. Acceptable for dev.",
+    "server.py is now 1364 lines (up from 1346). Splitting into routers/ subpackage is overdue (auth/sessions/messages/internal/public_v1/plugins). Iter4 review already flagged this."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_iteration4.py",
+    "/app/backend/tests/test_iteration5.py"
+  ],
+  "success_rate": {"backend": "99.1% (110/111)", "frontend": "n/a (skipped per request)"},
+  "test_credentials": "admin@wa.9x.design / admin123 (verified working). Old admin@wapihub.com correctly returns 401. Customer accounts auto-registered fresh per test (TEST_iter5_*).",
+  "seed_data_creation": "Each test run registers TEST_iter5_cust_*, TEST_iter5_reg_*, TEST_iter5_other_* customers and creates 2 wa_sessions per customer (named 'iter5 pair sess' and 'iter5 default-settings'). One session is deleted in test cleanup; the other persists. test_iteration4 still seeds connected sessions + scheduled docs + messages via direct mongo. Total suite ~118s (60s scheduler wait dominant).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter5 = full rebrand. New endpoint POST /api/sessions/{id}/pair works correctly (auth/validation/ownership all enforced). The ONE outstanding bug is GET /api/sessions/{id}/status not surfacing pairing_code/pairing_phone — single-line fix in server.py. Once that is fixed, re-run /app/backend/tests/test_iteration5.py and all 17 should pass. v2 endpoints use Form() for body, so test with data= not json= when sending phonenumber/message. Real WhatsApp connect/QR scan still NOT in scope. The pair endpoint actually called Baileys requestPairingCode successfully in our test (returned 200 with real 8-char code) — Baileys socket was reachable.",
+  "rca of the issue": "Bug RCA: /app/backend/server.py @api.get('/sessions/{session_id}/status') at line 584-597 builds response as `{**s, **update, 'qr': live.get('qr')}`. The `update` dict only contains 'status' and optionally 'phone'. The `live` dict (from wa_client.session_status → wa-service /sessions/:id/status) contains pairing_code & pairing_phone (added in iter5 to wa-service/server.js lines 303-304), but the backend handler never reads them. Reproduction: 1) login as customer, 2) POST /api/sessions {name}, 3) GET /api/sessions/{id}/status — observe response keys don't include 'pairing_code' or 'pairing_phone'. Mitigation: change return to include both keys (null-safe via .get())."
+}

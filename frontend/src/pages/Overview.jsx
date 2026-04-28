@@ -57,7 +57,7 @@ export default function Overview() {
           </div>
           <div className="h-2 bg-neutral-100 sharp overflow-hidden">
             <div
-              className="h-full bg-[#002FA7]"
+              className="h-full bg-[#1FA855]"
               style={{
                 width: `${Math.min(100, ((stats.quota_used / stats.quota_monthly) * 100) || 0)}%`,
               }}
@@ -69,10 +69,10 @@ export default function Overview() {
       <h2 className="font-display text-2xl mt-12 tracking-tight">Quick actions</h2>
       <div className="grid md:grid-cols-3 gap-0 mt-4 border border-neutral-200">
         <ActionCard
-          to="/app/sessions"
+          to="/app/sessions/new"
           icon={<Plugs size={22} weight="fill" />}
-          title="Link a WhatsApp number"
-          body="Scan a QR code to connect a new session."
+          title="Connect a WhatsApp number"
+          body="Scan a QR or pair via phone number to link a new service."
         />
         <ActionCard
           to="/app/send"
@@ -92,7 +92,7 @@ export default function Overview() {
 
       {isAdmin && (
         <div className="mt-12 border border-neutral-200 sharp p-6 flex items-start gap-4">
-          <ChartLineUp size={24} weight="fill" color="#002FA7" />
+          <ChartLineUp size={24} weight="fill" color="#1FA855" />
           <div>
             <h3 className="font-display font-semibold text-lg tracking-tight">Reseller mode</h3>
             <p className="text-sm text-neutral-600 mt-1">
@@ -138,12 +138,12 @@ function ActionCard({ to, icon, title, body, border }) {
         border ? "md:border-l border-neutral-200" : ""
       }`}
     >
-      <div className="w-10 h-10 bg-[#002FA7]/10 text-[#002FA7] flex items-center justify-center sharp">
+      <div className="w-10 h-10 bg-[#1FA855]/10 text-[#1FA855] flex items-center justify-center sharp">
         {icon}
       </div>
       <h3 className="font-display font-semibold text-lg tracking-tight">{title}</h3>
       <p className="text-sm text-neutral-600">{body}</p>
-      <span className="text-sm text-[#002FA7] inline-flex items-center gap-1 mt-1">
+      <span className="text-sm text-[#1FA855] inline-flex items-center gap-1 mt-1">
         Go <ArrowRight size={14} />
       </span>
     </Link>

@@ -147,16 +147,16 @@ export default function Billing() {
                 </div>
                 <ul className="mt-4 space-y-1.5 text-sm text-neutral-700 min-h-[160px]">
                   <li className="flex items-start gap-2">
-                    <CheckCircle size={14} weight="fill" color="#002FA7" className="mt-0.5 shrink-0" />
+                    <CheckCircle size={14} weight="fill" color="#1FA855" className="mt-0.5 shrink-0" />
                     {p.quota_monthly.toLocaleString()} messages / month
                   </li>
                   <li className="flex items-start gap-2">
-                    <CheckCircle size={14} weight="fill" color="#002FA7" className="mt-0.5 shrink-0" />
+                    <CheckCircle size={14} weight="fill" color="#1FA855" className="mt-0.5 shrink-0" />
                     {p.max_sessions} WhatsApp number{p.max_sessions > 1 ? "s" : ""}
                   </li>
                   {p.features?.map((f) => (
                     <li key={f} className="flex items-start gap-2">
-                      <CheckCircle size={14} weight="fill" color="#002FA7" className="mt-0.5 shrink-0" />
+                      <CheckCircle size={14} weight="fill" color="#1FA855" className="mt-0.5 shrink-0" />
                       {f}
                     </li>
                   ))}

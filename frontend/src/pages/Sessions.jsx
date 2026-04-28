@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import api from "../lib/api";
 import { PageHeader } from "./Overview";
 import { Plus, Trash, ArrowsClockwise, X } from "@phosphor-icons/react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 export default function Sessions() {
@@ -90,14 +91,14 @@ export default function Sessions() {
   return (
     <div className="p-10 fade-in">
       <div className="flex items-start justify-between gap-4">
-        <PageHeader title="WhatsApp Sessions" sub="Link a number by scanning the QR with WhatsApp on your phone." />
-        <button
-          onClick={() => setShowCreate(true)}
+        <PageHeader title="WhatsApp Services" sub="Each linked WhatsApp number runs as its own service. Click a row to manage." />
+        <Link
+          to="/app/sessions/new"
           className="btn-brand inline-flex items-center gap-2"
           data-testid="new-session-btn"
         >
-          <Plus size={16} /> New session
-        </button>
+          <Plus size={16} /> New Service
+        </Link>
       </div>
 
       <div className="mt-8 border border-neutral-200 sharp overflow-hidden">
@@ -188,7 +189,7 @@ export default function Sessions() {
                 onChange={(e) => setNewName(e.target.value)}
                 required
                 placeholder="e.g. Sales line"
-                className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7]"
+                className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855]"
               />
             </div>
             <div className="flex gap-2 justify-end">

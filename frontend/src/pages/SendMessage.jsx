@@ -104,7 +104,7 @@ export default function SendMessage() {
               data-testid="send-session-select"
               value={sessionId}
               onChange={(e) => setSessionId(e.target.value)}
-              className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7] bg-white"
+              className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855] bg-white"
               required
             >
               <option value="">Select session…</option>
@@ -126,7 +126,7 @@ export default function SendMessage() {
               value={to}
               onChange={(e) => setTo(e.target.value)}
               placeholder="919876543210"
-              className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7] font-mono"
+              className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855] font-mono"
             />
             <p className="text-xs text-neutral-500 mt-1 font-mono">
               No + or spaces. Example: 919876543210
@@ -144,8 +144,8 @@ export default function SendMessage() {
                 rows={6}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="Hello, this is a test message from WapiHub"
-                className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7]"
+                placeholder="Hello, this is a test message from wa.9x.design"
+                className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855]"
               />
             </div>
           ) : (
@@ -157,7 +157,7 @@ export default function SendMessage() {
                 <div className="mt-1.5">
                   {!file ? (
                     <label
-                      className="border border-dashed border-neutral-300 sharp px-4 py-8 flex flex-col items-center justify-center cursor-pointer hover:border-[#002FA7] hover:bg-blue-50/30 transition-colors"
+                      className="border border-dashed border-neutral-300 sharp px-4 py-8 flex flex-col items-center justify-center cursor-pointer hover:border-[#1FA855] hover:bg-blue-50/30 transition-colors"
                       data-testid="file-drop-area"
                     >
                       <Paperclip size={24} className="text-neutral-400" />
@@ -175,7 +175,7 @@ export default function SendMessage() {
                     </label>
                   ) : (
                     <div className="flex items-center gap-3 border border-neutral-300 sharp px-3 py-2.5">
-                      <span className="text-[#002FA7]">{fileIcon()}</span>
+                      <span className="text-[#1FA855]">{fileIcon()}</span>
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium truncate">{file.name}</div>
                         <div className="font-mono text-[11px] text-neutral-500">
@@ -205,7 +205,7 @@ export default function SendMessage() {
                   value={caption}
                   onChange={(e) => setCaption(e.target.value)}
                   placeholder="Optional caption for image/video/document"
-                  className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7]"
+                  className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855]"
                 />
               </div>
             </>
@@ -260,7 +260,7 @@ function Tab({ active, onClick, children, testId }) {
       data-testid={testId}
       className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
         active
-          ? "border-[#002FA7] text-[#002FA7]"
+          ? "border-[#1FA855] text-[#1FA855]"
           : "border-transparent text-neutral-600 hover:text-neutral-900"
       }`}
     >

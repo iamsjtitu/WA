@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger("wapihub.billing")
+logger = logging.getLogger("wa9x.billing")
 
 # Optional SDKs — only required when keys are configured
 try:
@@ -577,7 +577,7 @@ def make_router(db, current_user, admin_only):
                     "subscriber": {"email_address": user["email"]},
                     "custom_id": f"{user['id']}::{plan['id']}",
                     "application_context": {
-                        "brand_name": "WapiHub",
+                        "brand_name": "wa.9x.design",
                         "user_action": "SUBSCRIBE_NOW",
                         "return_url": f"{backend_url()}/api/billing/paypal/return?user_id={user['id']}&plan_id={plan['id']}",
                         "cancel_url": f"{frontend_url()}/app/billing?cancel=paypal",

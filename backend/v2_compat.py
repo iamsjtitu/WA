@@ -1,10 +1,7 @@
-"""360messenger v2 API compatibility layer.
+"""v2 API — drop-in compatible legacy endpoints.
 
-Endpoints mirror https://api.360messenger.com/v2/* so customers migrating
-from 360messenger can switch with zero code changes.
-
-Auth: `Authorization: Bearer {api_key}`
-Response shape: { success, statusCode, timestamp, data | result, ... }
+Bearer auth, multipart bodies, identical response shapes for easy migration
+of any existing WhatsApp-API integrations. Path: /api/v2/*
 """
 from __future__ import annotations
 
@@ -19,7 +16,7 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFile, File
 
-logger = logging.getLogger("wapihub.v2")
+logger = logging.getLogger("wa9x.v2")
 UPLOAD_DIR = PathLib("/app/wa-service/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -59,7 +56,7 @@ def v2_err(message: str, status: int = 400) -> dict:
 
 
 def parse_delay(delay_str: str) -> Optional[datetime]:
-    """360messenger delay format: 'MM-DD-YYYY HH:MM' in GMT."""
+    """wa.9x.design delay format: 'MM-DD-YYYY HH:MM' in GMT."""
     if not delay_str:
         return None
     try:

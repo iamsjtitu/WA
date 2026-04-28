@@ -1,4 +1,4 @@
-"""WapiHub backend — WhatsApp messaging API platform."""
+"""wa.9x.design backend — WhatsApp messaging API platform."""
 from __future__ import annotations
 
 from dotenv import load_dotenv
@@ -47,13 +47,13 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger("wapihub")
+logger = logging.getLogger("wa9x")
 
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
 
-app = FastAPI(title="WapiHub API")
+app = FastAPI(title="wa.9x.design API")
 api = APIRouter(prefix="/api")
 
 
@@ -66,7 +66,7 @@ def new_id() -> str:
 
 
 def gen_api_key() -> str:
-    return "wapi_" + secrets.token_urlsafe(32)
+    return "wa9x_" + secrets.token_urlsafe(32)
 
 
 # ---------------- Models ----------------
@@ -238,7 +238,7 @@ async def fire_webhook(user_id: str, payload: dict):
         "Content-Type": "application/json",
         "X-Wapihub-Signature": sig,
         "X-Wapihub-Event": payload.get("event", "message.received"),
-        "User-Agent": "WapiHub-Webhook/1.0",
+        "User-Agent": "wa.9x.design-Webhook/1.0",
     }
 
     last_error = "delivery failed"
@@ -609,6 +609,24 @@ async def restart_session(session_id: str, user: dict = Depends(current_user)):
         raise HTTPException(status_code=502, detail=str(e))
 
 
+class PairIn(BaseModel):
+    phone: str = Field(min_length=8, max_length=20)
+
+
+@api.post("/sessions/{session_id}/pair")
+async def pair_session(
+    session_id: str, payload: PairIn, user: dict = Depends(current_user)
+):
+    s = await db.wa_sessions.find_one({"id": session_id, "user_id": user["id"]})
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        result = await wa_client.request_pairing_code(session_id, payload.phone)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @api.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, user: dict = Depends(current_user)):
     s = await db.wa_sessions.find_one({"id": session_id, "user_id": user["id"]})
@@ -838,7 +856,7 @@ async def test_webhook(user: dict = Depends(current_user)):
         "event": "test",
         "session_id": "test-session",
         "from": "0000000000",
-        "text": "WapiHub webhook test event",
+        "text": "wa.9x.design webhook test event",
         "type": "text",
         "message_id": "test_" + new_id(),
         "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
@@ -1099,7 +1117,7 @@ async def public_sessions(request: Request):
 # ---------------- Health ----------------
 @api.get("/")
 async def root():
-    return {"service": "WapiHub API", "ok": True}
+    return {"service": "wa.9x.design API", "ok": True}
 
 
 @api.get("/health")
@@ -1118,7 +1136,7 @@ async def download_whmcs_plugin():
     p = PLUGINS_DIR / "whmcs.zip"
     if not p.exists():
         raise HTTPException(status_code=404, detail="plugin not built")
-    return FileResponse(p, media_type="application/zip", filename="wapihub-whmcs.zip")
+    return FileResponse(p, media_type="application/zip", filename="wa9x-whmcs.zip")
 
 
 @api.get("/plugins/woocommerce.zip")
@@ -1127,14 +1145,14 @@ async def download_woocommerce_plugin():
     p = PLUGINS_DIR / "woocommerce.zip"
     if not p.exists():
         raise HTTPException(status_code=404, detail="plugin not built")
-    return FileResponse(p, media_type="application/zip", filename="wapihub-woocommerce.zip")
+    return FileResponse(p, media_type="application/zip", filename="wa9x-woocommerce.zip")
 
 
 # ---------------- Wire app ----------------
 app.include_router(api)
 # Billing router (plans, subscriptions, webhooks for stripe/razorpay/paypal)
 app.include_router(billing_mod.make_router(db, current_user, admin_only), prefix="/api")
-# 360messenger v2 compatibility layer
+# wa.9x.design v2 compatibility layer
 app.include_router(
     v2_compat.make_router(db, wa_client, fire_webhook, _send_one, _send_media_one, _enforce_quota),
     prefix="/api",
@@ -1283,7 +1301,7 @@ async def on_startup():
     # spawn scheduled message dispatcher
     asyncio.create_task(_scheduled_dispatcher())
 
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@wapihub.com").lower()
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@wa9x.com").lower()
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
     existing = await db.users.find_one({"email": admin_email})
     if existing is None:
@@ -1320,7 +1338,7 @@ async def on_startup():
 - Role: admin
 
 ## Test Customer
-- Email: customer@wapihub.com
+- Email: customer@wa9x.com
 - Password: customer123
 - Role: customer (create via admin panel or POST /api/auth/register)
 

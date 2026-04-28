@@ -35,10 +35,10 @@ export default function Login() {
       <div className="hidden lg:flex relative bg-[#0A0A0A] text-white p-12 flex-col justify-between overflow-hidden">
         <div className="absolute inset-0 grid-bg-dark opacity-60 pointer-events-none" />
         <Link to="/" className="flex items-center gap-2 relative" data-testid="login-brand">
-          <div className="w-8 h-8 bg-[#002FA7] flex items-center justify-center sharp">
+          <div className="w-8 h-8 bg-[#1FA855] flex items-center justify-center sharp">
             <ChatCircle weight="fill" size={18} color="#fff" />
           </div>
-          <span className="font-display font-bold text-lg">WapiHub</span>
+          <span className="font-display font-bold text-lg">wa.9x.design</span>
         </Link>
         <div className="relative">
           <p className="font-mono text-xs uppercase tracking-widest text-[#EDFF00]">— signed in</p>
@@ -49,7 +49,7 @@ export default function Login() {
             Pick up where you left off — sessions, logs, and API keys all in one place.
           </p>
         </div>
-        <p className="font-mono text-xs text-neutral-500 relative">© {new Date().getFullYear()} WapiHub</p>
+        <p className="font-mono text-xs text-neutral-500 relative">© {new Date().getFullYear()} wa.9x.design</p>
       </div>
 
       <div className="flex items-center justify-center p-8">
@@ -57,7 +57,7 @@ export default function Login() {
           <h1 className="font-display text-3xl tracking-tight">Sign in</h1>
           <p className="text-neutral-600 text-sm mt-2">
             Don't have an account?{" "}
-            <Link to="/register" className="text-[#002FA7] underline" data-testid="link-to-register">
+            <Link to="/register" className="text-[#1FA855] underline" data-testid="link-to-register">
               Create one
             </Link>
           </p>
@@ -73,7 +73,7 @@ export default function Login() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7]"
+                className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855]"
                 placeholder="you@company.com"
                 autoComplete="email"
               />
@@ -88,7 +88,7 @@ export default function Login() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7]"
+                className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855]"
                 placeholder="••••••••"
                 autoComplete="current-password"
               />
@@ -111,7 +111,7 @@ export default function Login() {
           </form>
 
           <p className="mt-6 text-xs text-neutral-500 font-mono">
-            Default admin · admin@wapihub.com / admin123
+            Default admin · admin@wa9x.com / admin123
           </p>
         </div>
       </div>
