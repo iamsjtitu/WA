@@ -25,12 +25,18 @@ except ImportError:
     resend = None
 
 
+# Resend free tier allows 2 req/s; queue sends with a small gap to stay under it.
+_send_lock = asyncio.Lock()
+_last_send_at: list[float] = [0.0]
+_MIN_GAP_SECONDS = 0.6
+
+
 def _api_key() -> Optional[str]:
     return os.environ.get("RESEND_API_KEY", "").strip() or None
 
 
 def _from_address() -> str:
-    return os.environ.get("EMAIL_FROM", "wa.9x.design <noreply@send.9x.design>")
+    return os.environ.get("EMAIL_FROM", "wa.9x.design <noreply@9x.design>")
 
 
 def _frontend_url() -> str:
@@ -63,7 +69,14 @@ async def send_email(
     if text:
         params["text"] = text
     try:
-        result = await asyncio.to_thread(resend.Emails.send, params)
+        async with _send_lock:
+            import time
+
+            wait = _MIN_GAP_SECONDS - (time.monotonic() - _last_send_at[0])
+            if wait > 0:
+                await asyncio.sleep(wait)
+            result = await asyncio.to_thread(resend.Emails.send, params)
+            _last_send_at[0] = time.monotonic()
         logger.info("email sent to=%s id=%s", to, (result or {}).get("id"))
         return True
     except Exception as e:  # noqa: BLE001

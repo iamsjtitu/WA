@@ -173,7 +173,7 @@ PAYPAL_CLIENT_ID=""
 PAYPAL_SECRET=""
 PAYPAL_WEBHOOK_ID=""
 RESEND_API_KEY=""
-EMAIL_FROM="wa.9x.design <noreply@send.9x.design>"
+EMAIL_FROM="wa.9x.design <noreply@9x.design>"
 EOF
 chmod 600 "$APP_DIR/backend/.env"
 
