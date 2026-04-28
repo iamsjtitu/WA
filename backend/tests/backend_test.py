@@ -403,13 +403,15 @@ class TestWebhook:
         customer_account["webhook_url"] = url
 
     def test_test_webhook_when_set(self, customer_account):
-        # Ensure set
+        # Ensure set — use unreachable but fast-failing target (TCP RST on closed port)
         customer_account["session"].patch(
             f"{API}/me/webhook",
-            json={"url": "https://127.0.0.1:1/none"},
+            json={"url": "http://127.0.0.1:9/none"},
             timeout=10,
         )
-        r = customer_account["session"].post(f"{API}/me/webhook/test", timeout=15)
+        # /me/webhook/test now AWAITS fire_webhook (which has 4 retries with backoff
+        # 0+2+6+18=~26s) — large timeout required.
+        r = customer_account["session"].post(f"{API}/me/webhook/test", timeout=90)
         assert r.status_code == 200
         assert r.json().get("sent") is True
 
@@ -671,3 +673,406 @@ class TestHmacAlgo:
         # Trivial assertion: format checks
         assert expected.startswith("sha256=")
         assert len(expected.split("=", 1)[1]) == 64
+
+
+
+# ===================== Iteration 3: Webhook retry, Media GET, CSV bulk, Plans, Billing =====================
+
+
+# ---------------- Webhook retry & auto-disable ----------------
+class TestWebhookRetry:
+    def test_me_includes_disable_fields(self, customer_account):
+        r = customer_account["session"].get(f"{API}/auth/me", timeout=10)
+        assert r.status_code == 200
+        data = r.json()
+        assert "webhook_disabled" in data
+        assert "webhook_consecutive_failures" in data
+        assert isinstance(data["webhook_disabled"], bool)
+        assert isinstance(data["webhook_consecutive_failures"], int)
+
+    def test_failure_increments_counter(self, customer_account):
+        # set webhook to unreachable URL (port 9 = discard, connection refused — fast failures)
+        unreachable = "http://127.0.0.1:9/never"
+        r = customer_account["session"].patch(
+            f"{API}/me/webhook", json={"url": unreachable}, timeout=10
+        )
+        assert r.status_code == 200, r.text
+
+        # Wait out any in-flight background fire_webhook tasks left over from earlier
+        # tests (e.g. /internal/inbound spawns a background task that takes ~26s).
+        time.sleep(35)
+        # Deterministically reset counter to 0 via /enable
+        customer_account["session"].post(f"{API}/me/webhook/enable", timeout=10)
+        # re-set webhook url since enable doesn't touch it
+        customer_account["session"].patch(
+            f"{API}/me/webhook", json={"url": unreachable}, timeout=10
+        )
+        base = customer_account["session"].get(f"{API}/auth/me", timeout=10).json()
+        base_count = int(base.get("webhook_consecutive_failures") or 0)
+        assert base_count == 0, f"baseline not zero after enable: {base_count}"
+
+        # /test AWAITs fire_webhook: 4 attempts, exp backoff 0+2+6+18=~26s
+        t = customer_account["session"].post(f"{API}/me/webhook/test", timeout=90)
+        assert t.status_code == 200
+        assert t.json().get("sent") is True
+
+        # Counter should have been incremented synchronously (after retries failed)
+        me = customer_account["session"].get(f"{API}/auth/me", timeout=10).json()
+        new_count = int(me.get("webhook_consecutive_failures") or 0)
+        assert new_count == base_count + 1, (
+            f"counter did not increment after retries: base={base_count} new={new_count}"
+        )
+
+    def test_enable_resets_counter(self, customer_account):
+        r = customer_account["session"].post(f"{API}/me/webhook/enable", timeout=10)
+        assert r.status_code == 200
+        me = customer_account["session"].get(f"{API}/auth/me", timeout=10).json()
+        assert me.get("webhook_disabled") is False
+        assert int(me.get("webhook_consecutive_failures") or 0) == 0
+        # cleanup
+        customer_account["session"].delete(f"{API}/me/webhook", timeout=10)
+
+
+# ---------------- /api/media/{message_id} ----------------
+class TestMediaGet:
+    def test_media_no_auth(self):
+        r = requests.get(f"{API}/media/some-id-xxx", timeout=10)
+        assert r.status_code == 401
+
+    def test_media_other_user_404(self, admin_session, customer_account):
+        # Seed an inbound message owned by customer via /internal/inbound
+        sess = customer_account["session"].post(
+            f"{API}/sessions", json={"name": "TEST_media_get_sess"}, timeout=30
+        ).json()
+        sid = sess["id"]
+        try:
+            secret = _read_internal_secret_from_env_file()
+            mid = f"wamid.MEDIA_{secrets.token_hex(4)}"
+            r = requests.post(
+                f"{API}/internal/inbound",
+                json={
+                    "session_id": sid,
+                    "from": "1234567890",
+                    "text": "img",
+                    "type": "image",
+                    "message_id": mid,
+                    "has_media": True,
+                    "media_path": "/tmp/nonexistent_media_file.jpg",
+                    "mime_type": "image/jpeg",
+                    "file_name": "test.jpg",
+                },
+                headers={"X-Internal-Secret": secret},
+                timeout=10,
+            )
+            assert r.status_code == 200 and r.json().get("ok") is True
+
+            # find internal message id
+            time.sleep(0.5)
+            msgs = customer_account["session"].get(
+                f"{API}/messages?direction=inbound&limit=50", timeout=10
+            ).json()
+            mine = next((m for m in msgs if m.get("wa_message_id") == mid or m.get("message_id") == mid), None)
+            if mine is None:
+                # fallback: look by media flag + recent
+                mine = next((m for m in msgs if m.get("has_media")), None)
+            assert mine, f"could not find seeded inbound media message in {msgs[:3]}"
+            our_id = mine["id"]
+
+            # admin (different user) -> 404
+            r_admin = admin_session.get(f"{API}/media/{our_id}", timeout=10)
+            assert r_admin.status_code == 404
+
+            # owner -> 404 because file does not exist on disk
+            r_owner = customer_account["session"].get(f"{API}/media/{our_id}", timeout=10)
+            assert r_owner.status_code == 404
+            detail = r_owner.json().get("detail", "").lower()
+            assert "media" in detail or "unavailable" in detail or "file" in detail
+        finally:
+            customer_account["session"].delete(f"{API}/sessions/{sid}", timeout=20)
+
+
+# ---------------- CSV bulk send ----------------
+class TestBulkCsv:
+    def _make_session(self, customer_account, name="TEST_csv_sess"):
+        r = customer_account["session"].post(
+            f"{API}/sessions", json={"name": name}, timeout=30
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["id"]
+
+    def test_bulk_csv_no_header(self, customer_account):
+        sid = self._make_session(customer_account, "TEST_csv_noheader")
+        try:
+            files = {"file": ("a.csv", b"", "text/csv")}
+            data = {"session_id": sid, "template": "Hi {{name}}"}
+            r = customer_account["session"].post(
+                f"{API}/messages/bulk-csv", data=data, files=files, timeout=20
+            )
+            assert r.status_code == 400
+        finally:
+            customer_account["session"].delete(f"{API}/sessions/{sid}", timeout=20)
+
+    def test_bulk_csv_empty_rows(self, customer_account):
+        sid = self._make_session(customer_account, "TEST_csv_empty")
+        try:
+            files = {"file": ("a.csv", b"phone,name\n", "text/csv")}
+            data = {"session_id": sid, "template": "Hi {{name}}"}
+            r = customer_account["session"].post(
+                f"{API}/messages/bulk-csv", data=data, files=files, timeout=20
+            )
+            assert r.status_code == 400
+            assert "no valid rows" in r.json().get("detail", "").lower()
+        finally:
+            customer_account["session"].delete(f"{API}/sessions/{sid}", timeout=20)
+
+    def test_bulk_csv_session_not_found(self, customer_account):
+        files = {"file": ("a.csv", b"phone,name\n+15551234567,Alice\n", "text/csv")}
+        data = {"session_id": "nonexistent-zzz", "template": "Hi {{name}}"}
+        r = customer_account["session"].post(
+            f"{API}/messages/bulk-csv", data=data, files=files, timeout=20
+        )
+        assert r.status_code == 404
+
+    def test_bulk_csv_valid_parses_and_renders(self, customer_account):
+        sid = self._make_session(customer_account, "TEST_csv_ok")
+        try:
+            csv_body = b"phone,name\n+15551234567,Alice\n+15557654321,Bob\n"
+            files = {"file": ("a.csv", csv_body, "text/csv")}
+            data = {"session_id": sid, "template": "Hi {{name}}, hello!"}
+            r = customer_account["session"].post(
+                f"{API}/messages/bulk-csv", data=data, files=files, timeout=60
+            )
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body.get("total") == 2
+            assert isinstance(body.get("sent"), int)
+            assert isinstance(body.get("failed"), int)
+            assert body["sent"] + body["failed"] == 2
+            assert isinstance(body.get("results"), list)
+            assert len(body["results"]) == 2
+            for item in body["results"]:
+                assert "to" in item and "status" in item
+
+            # template rendering check: list outbound messages and assert text contains rendered name
+            time.sleep(0.5)
+            msgs = customer_account["session"].get(
+                f"{API}/messages?direction=outbound&limit=50", timeout=10
+            ).json()
+            texts = [m.get("text", "") for m in msgs]
+            assert any("Hi Alice" in t for t in texts), f"Alice template not rendered. Texts: {texts[:5]}"
+            assert any("Hi Bob" in t for t in texts), f"Bob template not rendered. Texts: {texts[:5]}"
+        finally:
+            customer_account["session"].delete(f"{API}/sessions/{sid}", timeout=20)
+
+
+# ---------------- Plans CRUD ----------------
+class TestPlans:
+    def test_public_plans_active_only(self):
+        r = requests.get(f"{API}/plans", timeout=10)
+        assert r.status_code == 200
+        plans = r.json()
+        assert isinstance(plans, list)
+        for p in plans:
+            assert p.get("active") is True
+
+    def test_admin_plans_requires_admin(self, customer_account):
+        r = customer_account["session"].get(f"{API}/admin/plans", timeout=10)
+        assert r.status_code == 403
+
+    def test_admin_plans_crud(self, admin_session):
+        # CREATE
+        payload = {
+            "name": "TEST_plan_basic",
+            "price": 99.0,
+            "currency": "INR",
+            "quota_monthly": 5000,
+            "max_sessions": 2,
+            "features": ["api", "webhook"],
+            "active": True,
+            "sort": 50,
+        }
+        r = admin_session.post(f"{API}/admin/plans", json=payload, timeout=10)
+        assert r.status_code == 200, r.text
+        plan = r.json()
+        assert plan["name"] == "TEST_plan_basic"
+        assert plan["price"] == 99.0
+        assert "id" in plan and plan["id"]
+        plan_id = plan["id"]
+
+        try:
+            # LIST (admin)
+            r_list = admin_session.get(f"{API}/admin/plans", timeout=10)
+            assert r_list.status_code == 200
+            ids = [p["id"] for p in r_list.json()]
+            assert plan_id in ids
+
+            # PATCH
+            r_upd = admin_session.patch(
+                f"{API}/admin/plans/{plan_id}",
+                json={"price": 149.0, "active": False},
+                timeout=10,
+            )
+            assert r_upd.status_code == 200
+            updated = r_upd.json()
+            assert updated["price"] == 149.0
+            assert updated["active"] is False
+
+            # public list should NOT include inactive plan
+            r_pub = requests.get(f"{API}/plans", timeout=10)
+            assert plan_id not in [p["id"] for p in r_pub.json()]
+
+            # admin list still includes it
+            r_admin_list = admin_session.get(f"{API}/admin/plans", timeout=10)
+            assert plan_id in [p["id"] for p in r_admin_list.json()]
+        finally:
+            # DELETE
+            r_del = admin_session.delete(f"{API}/admin/plans/{plan_id}", timeout=10)
+            assert r_del.status_code == 200
+            r_after = admin_session.get(f"{API}/admin/plans", timeout=10)
+            assert plan_id not in [p["id"] for p in r_after.json()]
+
+    def test_admin_patch_nonexistent_plan(self, admin_session):
+        r = admin_session.patch(
+            f"{API}/admin/plans/does-not-exist", json={"price": 1.0}, timeout=10
+        )
+        assert r.status_code == 404
+
+    def test_admin_delete_nonexistent_plan(self, admin_session):
+        r = admin_session.delete(f"{API}/admin/plans/does-not-exist", timeout=10)
+        assert r.status_code == 404
+
+
+# ---------------- Billing gateways (no keys configured) ----------------
+class TestBillingGateways:
+    def test_gateways_status(self):
+        r = requests.get(f"{API}/billing/gateways", timeout=10)
+        assert r.status_code == 200
+        body = r.json()
+        assert body == {"stripe": False, "razorpay": False, "paypal": False}
+
+    def test_my_subscription_empty(self, customer_account):
+        r = customer_account["session"].get(f"{API}/me/subscription", timeout=10)
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("subscription") is None
+        assert body.get("plan") is None
+
+    def _create_active_plan(self, admin_session) -> str:
+        r = admin_session.post(
+            f"{API}/admin/plans",
+            json={
+                "name": "TEST_billing_plan",
+                "price": 10.0,
+                "currency": "USD",
+                "quota_monthly": 100,
+                "max_sessions": 1,
+                "active": True,
+            },
+            timeout=10,
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["id"]
+
+    def test_stripe_checkout_not_configured(self, admin_session, customer_account):
+        plan_id = self._create_active_plan(admin_session)
+        try:
+            r = customer_account["session"].post(
+                f"{API}/billing/stripe/checkout", json={"plan_id": plan_id}, timeout=10
+            )
+            assert r.status_code == 400
+            assert "stripe" in r.json().get("detail", "").lower()
+            assert "configured" in r.json().get("detail", "").lower()
+        finally:
+            admin_session.delete(f"{API}/admin/plans/{plan_id}", timeout=10)
+
+    def test_razorpay_create_not_configured(self, admin_session, customer_account):
+        plan_id = self._create_active_plan(admin_session)
+        try:
+            r = customer_account["session"].post(
+                f"{API}/billing/razorpay/create-subscription",
+                json={"plan_id": plan_id},
+                timeout=10,
+            )
+            assert r.status_code == 400
+            assert "razorpay" in r.json().get("detail", "").lower()
+        finally:
+            admin_session.delete(f"{API}/admin/plans/{plan_id}", timeout=10)
+
+    def test_paypal_create_not_configured(self, admin_session, customer_account):
+        plan_id = self._create_active_plan(admin_session)
+        try:
+            r = customer_account["session"].post(
+                f"{API}/billing/paypal/create-subscription",
+                json={"plan_id": plan_id},
+                timeout=10,
+            )
+            assert r.status_code == 400
+            assert "paypal" in r.json().get("detail", "").lower()
+        finally:
+            admin_session.delete(f"{API}/admin/plans/{plan_id}", timeout=10)
+
+    def test_stripe_cancel_not_configured(self, customer_account):
+        r = customer_account["session"].post(f"{API}/billing/stripe/cancel", timeout=10)
+        # Either 400 'not configured' or 404 'no active sub'
+        assert r.status_code in (400, 404)
+
+    def test_billing_endpoints_require_auth(self):
+        r = requests.post(
+            f"{API}/billing/stripe/checkout", json={"plan_id": "x"}, timeout=10
+        )
+        assert r.status_code == 401
+        r2 = requests.get(f"{API}/me/subscription", timeout=10)
+        assert r2.status_code == 401
+
+
+# ---------------- Webhook receivers ----------------
+class TestBillingWebhooks:
+    def test_stripe_webhook_not_configured(self):
+        # STRIPE_SECRET_KEY empty -> 400 'Stripe not configured'
+        r = requests.post(
+            f"{API}/webhooks/stripe",
+            data=b'{"type":"test"}',
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
+        assert r.status_code == 400
+        assert "stripe" in r.json().get("detail", "").lower()
+
+    def test_razorpay_webhook_no_secret_parses(self):
+        # No RAZORPAY_WEBHOOK_SECRET set -> no signature enforcement; valid JSON should return 200
+        r = requests.post(
+            f"{API}/webhooks/razorpay",
+            data=b'{"event":"subscription.activated","payload":{}}',
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
+        assert r.status_code == 200, r.text
+        assert r.json().get("ok") is True
+
+    def test_razorpay_webhook_invalid_json(self):
+        r = requests.post(
+            f"{API}/webhooks/razorpay",
+            data=b"not-json",
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
+        assert r.status_code == 400
+
+    def test_paypal_webhook_accepts_event(self):
+        r = requests.post(
+            f"{API}/webhooks/paypal",
+            data=b'{"event_type":"BILLING.SUBSCRIPTION.CANCELLED","resource":{"id":"I-XXX"}}',
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
+        assert r.status_code == 200
+        assert r.json().get("ok") is True
+
+    def test_paypal_webhook_invalid_json(self):
+        r = requests.post(
+            f"{API}/webhooks/paypal",
+            data=b"<<<not-json",
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
+        assert r.status_code == 400

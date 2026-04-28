@@ -12,6 +12,8 @@ import BulkSend from "./pages/BulkSend";
 import MessageLogs from "./pages/MessageLogs";
 import ApiDocs from "./pages/ApiDocs";
 import Customers from "./pages/Customers";
+import AdminPlans from "./pages/AdminPlans";
+import Billing from "./pages/Billing";
 import Settings from "./pages/Settings";
 import { Toaster } from "sonner";
 
@@ -67,6 +69,8 @@ function App() {
               <Route path="logs" element={<MessageLogs />} />
               <Route path="docs" element={<ApiDocs />} />
               <Route path="customers" element={<Customers />} />
+              <Route path="plans" element={<AdminPlans />} />
+              <Route path="billing" element={<Billing />} />
               <Route path="settings" element={<Settings />} />
             </Route>
           </Route>

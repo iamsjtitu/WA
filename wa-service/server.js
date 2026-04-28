@@ -14,6 +14,7 @@ const {
   useMultiFileAuthState,
   Browsers,
   fetchLatestBaileysVersion,
+  downloadMediaMessage,
 } = baileysPkg;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,8 +22,30 @@ const __dirname = path.dirname(__filename);
 const AUTH_ROOT = process.env.WA_AUTH_DIR || path.join(__dirname, "auth");
 const FASTAPI_URL = process.env.FASTAPI_URL || "http://127.0.0.1:8001";
 const INTERNAL_SECRET = process.env.INTERNAL_SECRET || "";
+const INBOUND_MEDIA_DIR = path.join(__dirname, "uploads", "inbound");
 
 if (!fs.existsSync(AUTH_ROOT)) fs.mkdirSync(AUTH_ROOT, { recursive: true });
+if (!fs.existsSync(INBOUND_MEDIA_DIR)) fs.mkdirSync(INBOUND_MEDIA_DIR, { recursive: true });
+
+function extForMime(mime) {
+  const m = (mime || "").toLowerCase();
+  if (m.includes("jpeg") || m.includes("jpg")) return ".jpg";
+  if (m.includes("png")) return ".png";
+  if (m.includes("gif")) return ".gif";
+  if (m.includes("webp")) return ".webp";
+  if (m.includes("mp4")) return ".mp4";
+  if (m.includes("3gp")) return ".3gp";
+  if (m.includes("ogg")) return ".ogg";
+  if (m.includes("mpeg") || m.includes("mp3")) return ".mp3";
+  if (m.includes("wav")) return ".wav";
+  if (m.includes("pdf")) return ".pdf";
+  if (m.includes("msword")) return ".doc";
+  if (m.includes("officedocument.wordprocessingml")) return ".docx";
+  if (m.includes("officedocument.spreadsheetml")) return ".xlsx";
+  if (m.includes("plain")) return ".txt";
+  if (m.includes("csv")) return ".csv";
+  return ".bin";
+}
 
 const logger = pino({ level: "warn" });
 
@@ -72,24 +95,53 @@ async function startSession(sessionId) {
         let text = "";
         let msgType = "text";
         let hasMedia = false;
+        let mimeType = null;
+        let fileName = null;
         if (c.conversation) text = c.conversation;
         else if (c.extendedTextMessage?.text) text = c.extendedTextMessage.text;
         else if (c.imageMessage) {
           text = c.imageMessage.caption || "";
           msgType = "image";
           hasMedia = true;
+          mimeType = c.imageMessage.mimetype || "image/jpeg";
         } else if (c.videoMessage) {
           text = c.videoMessage.caption || "";
           msgType = "video";
           hasMedia = true;
+          mimeType = c.videoMessage.mimetype || "video/mp4";
         } else if (c.documentMessage) {
           text = c.documentMessage.caption || c.documentMessage.fileName || "";
           msgType = "document";
           hasMedia = true;
+          mimeType = c.documentMessage.mimetype || "application/octet-stream";
+          fileName = c.documentMessage.fileName || null;
         } else if (c.audioMessage) {
           msgType = "audio";
           hasMedia = true;
+          mimeType = c.audioMessage.mimetype || "audio/ogg";
         } else continue;
+
+        // Download media to local file
+        let mediaPath = null;
+        if (hasMedia) {
+          try {
+            const buffer = await downloadMediaMessage(
+              m,
+              "buffer",
+              {},
+              { logger, reuploadRequest: sock.updateMediaMessage }
+            );
+            const ext = fileName
+              ? path.extname(fileName) || extForMime(mimeType)
+              : extForMime(mimeType);
+            const finalName = `${m.key.id}${ext}`;
+            mediaPath = path.join(INBOUND_MEDIA_DIR, finalName);
+            fs.writeFileSync(mediaPath, buffer);
+            if (!fileName) fileName = finalName;
+          } catch (e) {
+            console.error("[wa] media download failed:", e.message);
+          }
+        }
 
         const fromPhone = remote.split("@")[0];
         const payload = {
@@ -100,6 +152,9 @@ async function startSession(sessionId) {
           message_id: m.key.id,
           timestamp: Number(m.messageTimestamp || 0) * 1000,
           has_media: hasMedia,
+          media_path: mediaPath,
+          mime_type: mimeType,
+          file_name: fileName,
         };
         fetch(`${FASTAPI_URL}/api/internal/inbound`, {
           method: "POST",

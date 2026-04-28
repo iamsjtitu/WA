@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration 3 backend testing complete: webhook retry+auto-disable counter, /api/media/{id} (auth+ownership+missing-file), /api/messages/bulk-csv (no-header/empty/session-not-found/template-rendering), Plans CRUD (public+admin), 3-gateway billing endpoints (Stripe/Razorpay/PayPal) with 'not configured' graceful 400, gateway webhooks (stripe blocked when unconfigured, razorpay parses JSON without secret, paypal accepts events). All 72/72 pytest tests pass (carryover 46 from iteration_2 + 26 new for iteration_3). No regressions.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/me/webhook/test", "issue": "Endpoint AWAITs fire_webhook synchronously. With unreachable target it blocks the HTTP request for ~26 s (4 retries × exp backoff 0+2+6+18). UX-wise the dashboard 'Test' button will spin for 30 s+ — should be wrapped in asyncio.create_task() like /internal/inbound does, returning 200 immediately."},
+      {"endpoint": "POST /api/messages/bulk-csv", "issue": "Template syntax is {{var}} (double braces) but problem statement mentions {name} (single braces). Working code uses {{name}} — confirm this is the intended format with users; otherwise add support for {var} as well."},
+      {"endpoint": "POST /api/webhooks/razorpay", "issue": "When RAZORPAY_WEBHOOK_SECRET is empty, signature verification is silently skipped — anyone can POST any event and it will be processed. OK for MVP but should warn-log or require the secret in production."},
+      {"endpoint": "POST /api/webhooks/paypal", "issue": "No signature verification at all (TODO comment notes /v1/notifications/verify-webhook-signature). For MVP this is fine but flag for production."},
+      {"endpoint": "DELETE /api/me/webhook", "issue": "Also $unsets webhook_disabled & webhook_consecutive_failures — an admin/customer cannot inspect 'how many failures occurred before deletion' afterwards. Consider keeping the counter for audit log."},
+      {"endpoint": "POST /api/billing/stripe/cancel", "issue": "Order of checks: stripe_init() runs first, so when Stripe is unconfigured it returns 'Stripe is not configured' even before checking if user has an active sub. That is fine; documented."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Wrap fire_webhook() call inside POST /me/webhook/test with asyncio.create_task() so the endpoint returns immediately (currently blocks ~26 s on unreachable URL).",
+    "Clarify CSV template variable syntax ({{name}} vs {name}). Code uses {{name}}; if {name} is required, update _render_template to also accept single braces.",
+    "billing.py is 676 lines — together with server.py (1142 lines) the backend is now 1.8k lines and approaching maintainability limits. Consider splitting server.py into routers (auth, sessions, messages, webhook, internal, public_v1) before adding more features.",
+    "Add Razorpay webhook signature enforcement when RAZORPAY_WEBHOOK_SECRET is set (already partially handled) and warn-log when secret is missing.",
+    "Add PayPal webhook signature verification via /v1/notifications/verify-webhook-signature (currently a TODO)."
+  ],
+  "critical_code_review_comments": [
+    "fire_webhook retry loop uses fixed delays [2,6,18] — no jitter. Many simultaneous failures from the same target will resync retries; consider adding +/-20% jitter.",
+    "WEBHOOK_AUTO_DISABLE_AFTER=10 is hard-coded — should be configurable per-user or via env var.",
+    "Bulk CSV: phone column auto-detection picks first column if no phone/number/mobile/to header found — this can silently send to a non-phone column. Consider failing with 400 if no recognizable phone column.",
+    "Bulk CSV: rate-limited with asyncio.sleep(0.6) per row inside the request handler — for large CSVs (e.g. 500 rows = 5 minutes) the HTTP request will time out at ingress. Should be pushed to a background job/queue with a status endpoint.",
+    "Bulk CSV: _enforce_quota called once with len(rows), but actual sends happen sequentially and quota_used is incremented only on success — quota_used can be undercounted while in-flight sends run.",
+    "billing.py imports stripe and razorpay SDKs lazily but no requirements pin — verify they're in requirements.txt; if missing, /billing/* endpoints will return 500 instead of graceful 400.",
+    "/api/media/{id} streams from local disk via FileResponse — if media is stored on the persistent disk in a multi-pod setup, only the pod that downloaded it can serve it. Consider upgrading to S3/GCS-style object storage with signed URLs for horizontal scale.",
+    "Plan price uses float — for currency this should be int (paise/cents) or Decimal; floating point arithmetic on money will round-trip wrong over time.",
+    "Plan currency validated as length-3 but no enum — accepts e.g. 'XYZ'. Add an allowlist of supported currencies.",
+    "PayPal return URL uses BACKEND_PUBLIC_URL but webhook activation happens on /webhooks/paypal. Activate-on-return is also implemented — duplicate activation risk if both fire (mitigated by activate_subscription idempotency presumably; verify)."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (72/72)", "frontend": "n/a (not in scope)"},
+  "test_credentials": "admin@wapihub.com / admin123 (from /app/memory/test_credentials.md & /app/backend/.env). INTERNAL_SECRET read from /app/backend/.env at runtime by tests.",
+  "seed_data_creation": "Each pytest run registers a fresh TEST_customer_* user; admin creates TEST_admincust_*, TEST_plan_basic, TEST_billing_plan plans (deleted in test teardown). Background fire_webhook tasks from inbound tests are awaited 35 s in TestWebhookRetry to avoid bleed-over. No persistent pollution beyond inbound message documents tied to deleted sessions.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All iteration_3 features verified. Real WhatsApp QR scan, real Stripe/Razorpay/PayPal flow (with keys), and PayPal webhook signature verification are out-of-scope for this iteration. fire_webhook autodisable-after-10 was NOT directly tested (would need 10 sequential ~26 s blocking calls = ~5 min); only the +1 increment path is verified — main agent should consider parametrizing WEBHOOK_AUTO_DISABLE_AFTER to a small value (e.g. 2) in tests, OR refactor fire_webhook to spawn background and add a synchronous test seam. The dashboard /me/webhook/test UX issue (blocks ~26 s) is the highest-priority fix.",
+  "rca of the issue": "n/a — no failures."
+}

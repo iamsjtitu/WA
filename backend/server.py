@@ -38,6 +38,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
 
 import auth as auth_mod
+import billing as billing_mod
 import wa_client
 import wa_supervisor
 
@@ -90,6 +91,8 @@ class UserOut(BaseModel):
     created_at: str
     webhook_url: Optional[str] = None
     webhook_secret: Optional[str] = None
+    webhook_disabled: bool = False
+    webhook_consecutive_failures: int = 0
 
 
 class CustomerCreateIn(BaseModel):
@@ -144,6 +147,18 @@ class InboundIn(BaseModel):
     message_id: Optional[str] = None
     timestamp: Optional[int] = None
     has_media: bool = False
+    media_path: Optional[str] = None
+    mime_type: Optional[str] = None
+    file_name: Optional[str] = None
+
+
+class BulkCsvIn(BaseModel):
+    session_id: str
+    template: str = Field(min_length=1, max_length=4096)
+
+
+class WebhookEnableIn(BaseModel):
+    pass
 
 
 # ---------------- Helpers ----------------
@@ -170,6 +185,8 @@ def user_to_out(u: dict) -> UserOut:
         created_at=u.get("created_at", ""),
         webhook_url=u.get("webhook_url"),
         webhook_secret=u.get("webhook_secret"),
+        webhook_disabled=bool(u.get("webhook_disabled", False)),
+        webhook_consecutive_failures=int(u.get("webhook_consecutive_failures", 0) or 0),
     )
 
 
@@ -179,7 +196,20 @@ def normalize_phone(phone: str) -> str:
 
 # ---------------- Webhook helpers ----------------
 UPLOAD_DIR = PathLib("/app/wa-service/uploads")
+INBOUND_MEDIA_DIR = PathLib("/app/wa-service/uploads/inbound")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+INBOUND_MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+
+WEBHOOK_RETRY_DELAYS = [2, 6, 18]  # seconds — 3 attempts total
+WEBHOOK_AUTO_DISABLE_AFTER = 10  # consecutive failures
+
+
+def public_backend_url() -> str:
+    return (
+        os.environ.get("BACKEND_PUBLIC_URL")
+        or os.environ.get("APP_URL")
+        or "http://localhost:8001"
+    ).rstrip("/")
 
 
 def hmac_sign(secret: str, body: bytes) -> str:
@@ -187,8 +217,9 @@ def hmac_sign(secret: str, body: bytes) -> str:
 
 
 async def fire_webhook(user_id: str, payload: dict):
+    """Deliver webhook with exponential backoff & auto-disable on persistent failure."""
     user = await db.users.find_one({"id": user_id}, {"_id": 0})
-    if not user or not user.get("webhook_url"):
+    if not user or not user.get("webhook_url") or user.get("webhook_disabled"):
         return
     url = user["webhook_url"]
     secret = user.get("webhook_secret") or user.get("api_key", "")
@@ -200,11 +231,52 @@ async def fire_webhook(user_id: str, payload: dict):
         "X-Wapihub-Event": payload.get("event", "message.received"),
         "User-Agent": "WapiHub-Webhook/1.0",
     }
+
+    last_error = "delivery failed"
+    for attempt, delay in enumerate([0] + WEBHOOK_RETRY_DELAYS):
+        if delay:
+            await asyncio.sleep(delay)
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                r = await c.post(url, content=body, headers=headers)
+            if 200 <= r.status_code < 300:
+                # success — clear failure counter
+                await db.users.update_one(
+                    {"id": user_id},
+                    {"$set": {"webhook_consecutive_failures": 0}},
+                )
+                return
+            last_error = f"HTTP {r.status_code}"
+        except Exception as e:
+            last_error = str(e)
+        logger.info(
+            "webhook attempt %d/%d failed user=%s url=%s err=%s",
+            attempt + 1,
+            len(WEBHOOK_RETRY_DELAYS) + 1,
+            user_id,
+            url,
+            last_error,
+        )
+
+    # all attempts failed — record + maybe disable
+    new_count = int(user.get("webhook_consecutive_failures", 0) or 0) + 1
+    update: dict = {"$inc": {"webhook_consecutive_failures": 1}}
+    if new_count >= WEBHOOK_AUTO_DISABLE_AFTER:
+        update["$set"] = {"webhook_disabled": True}
+    await db.users.update_one({"id": user_id}, update)
     try:
-        async with httpx.AsyncClient(timeout=10.0) as c:
-            await c.post(url, content=body, headers=headers)
-    except Exception as e:
-        logger.warning("webhook delivery failed user=%s url=%s: %s", user_id, url, e)
+        await db.webhook_failures.insert_one(
+            {
+                "id": new_id(),
+                "user_id": user_id,
+                "url": url,
+                "event": payload.get("event"),
+                "error": last_error,
+                "at": now_iso(),
+            }
+        )
+    except Exception:
+        pass
 
 
 # ---------------- Auth Endpoints ----------------
@@ -679,7 +751,24 @@ async def set_webhook(payload: WebhookSetIn, user: dict = Depends(current_user))
 async def clear_webhook(user: dict = Depends(current_user)):
     await db.users.update_one(
         {"id": user["id"]},
-        {"$unset": {"webhook_url": "", "webhook_secret": ""}},
+        {
+            "$unset": {
+                "webhook_url": "",
+                "webhook_secret": "",
+                "webhook_disabled": "",
+                "webhook_consecutive_failures": "",
+            }
+        },
+    )
+    return {"ok": True}
+
+
+@api.post("/me/webhook/enable")
+async def enable_webhook(user: dict = Depends(current_user)):
+    """Re-enable webhook after auto-disable from consecutive failures."""
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"webhook_disabled": False, "webhook_consecutive_failures": 0}},
     )
     return {"ok": True}
 
@@ -716,8 +805,9 @@ async def inbound_message(payload: InboundIn, request: Request):
         return {"ok": False, "reason": "session not found"}
 
     user_id = s["user_id"]
+    msg_id = new_id()
     msg_doc = {
-        "id": new_id(),
+        "id": msg_id,
         "user_id": user_id,
         "session_id": payload.session_id,
         "direction": "inbound",
@@ -726,12 +816,19 @@ async def inbound_message(payload: InboundIn, request: Request):
         "text": payload.text,
         "type": payload.type,
         "has_media": payload.has_media,
+        "media_path": payload.media_path,
+        "mime_type": payload.mime_type,
+        "file_name": payload.file_name,
         "wa_message_id": payload.message_id,
         "status": "received",
         "source": "inbound",
         "sent_at": now_iso(),
     }
     await db.messages.insert_one(msg_doc)
+
+    media_url = None
+    if payload.has_media and payload.media_path:
+        media_url = f"{public_backend_url()}/api/media/{msg_id}"
 
     asyncio.create_task(
         fire_webhook(
@@ -745,10 +842,110 @@ async def inbound_message(payload: InboundIn, request: Request):
                 "message_id": payload.message_id,
                 "timestamp": payload.timestamp,
                 "has_media": payload.has_media,
+                "media_url": media_url,
+                "mime_type": payload.mime_type,
+                "file_name": payload.file_name,
             },
         )
     )
-    return {"ok": True}
+    return {"ok": True, "id": msg_id}
+
+
+# ---------------- Inbound media download ----------------
+from fastapi.responses import FileResponse  # noqa: E402
+
+
+@api.get("/media/{message_id}")
+async def get_media(message_id: str, request: Request):
+    """Serve inbound media. Auth via cookie OR X-API-Key header."""
+    user = None
+    api_key = request.headers.get("X-API-Key")
+    if api_key:
+        user = await db.users.find_one(
+            {"api_key": api_key}, {"_id": 0, "password_hash": 0}
+        )
+    if not user:
+        try:
+            user = await auth_mod.get_current_user(request, db)
+        except Exception:
+            user = None
+    if not user:
+        raise HTTPException(status_code=401, detail="auth required (X-API-Key or session)")
+
+    msg = await db.messages.find_one(
+        {"id": message_id, "user_id": user["id"]}, {"_id": 0}
+    )
+    if not msg:
+        raise HTTPException(status_code=404, detail="message not found")
+    path = msg.get("media_path")
+    if not path or not PathLib(path).exists():
+        raise HTTPException(status_code=404, detail="media file unavailable")
+    return FileResponse(
+        path,
+        media_type=msg.get("mime_type") or "application/octet-stream",
+        filename=msg.get("file_name") or PathLib(path).name,
+    )
+
+
+# ---------------- CSV bulk send ----------------
+import csv as _csv  # noqa: E402
+import io  # noqa: E402
+
+
+def _render_template(template: str, row: dict) -> str:
+    out = template
+    for k, v in row.items():
+        out = out.replace("{{" + k + "}}", str(v) if v is not None else "")
+    return out
+
+
+@api.post("/messages/bulk-csv")
+async def bulk_csv_send(
+    session_id: str = Form(...),
+    template: str = Form(...),
+    file: UploadFile = File(...),
+    user: dict = Depends(current_user),
+):
+    """CSV must have a header row; first column = phone (or 'phone'), rest are template vars."""
+    s = await db.wa_sessions.find_one({"id": session_id, "user_id": user["id"]})
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    contents = (await file.read()).decode("utf-8", errors="replace")
+    reader = _csv.DictReader(io.StringIO(contents))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV must include a header row")
+
+    phone_key = next(
+        (h for h in reader.fieldnames if h.lower() in ("phone", "number", "mobile", "to")),
+        reader.fieldnames[0],
+    )
+    rows = []
+    for row in reader:
+        phone = normalize_phone(row.get(phone_key, ""))
+        if not phone:
+            continue
+        rows.append({"phone": phone, "row": row})
+    if not rows:
+        raise HTTPException(status_code=400, detail="No valid rows with phone numbers found")
+
+    await _enforce_quota(user, len(rows))
+
+    sent_count = 0
+    failed = 0
+    results = []
+    for r in rows:
+        rendered = _render_template(template, r["row"])
+        msg = await _send_one(user["id"], session_id, r["phone"], rendered, "csv_bulk")
+        if msg["status"] == "sent":
+            sent_count += 1
+        else:
+            failed += 1
+        results.append({"to": msg["to"], "status": msg["status"], "error": msg.get("error")})
+        await asyncio.sleep(0.6)
+    if sent_count:
+        await db.users.update_one({"id": user["id"]}, {"$inc": {"quota_used": sent_count}})
+    return {"total": len(rows), "sent": sent_count, "failed": failed, "results": results}
 
 
 @api.get("/messages")
@@ -856,6 +1053,8 @@ async def health():
 
 # ---------------- Wire app ----------------
 app.include_router(api)
+# Billing router (plans, subscriptions, webhooks for stripe/razorpay/paypal)
+app.include_router(billing_mod.make_router(db, current_user, admin_only), prefix="/api")
 
 app.add_middleware(
     CORSMiddleware,

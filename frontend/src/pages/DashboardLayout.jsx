@@ -11,6 +11,8 @@ import {
   Gear,
   SignOut,
   PaperPlane,
+  Tag,
+  CreditCard,
 } from "@phosphor-icons/react";
 
 export default function DashboardLayout() {
@@ -31,7 +33,12 @@ export default function DashboardLayout() {
     { to: "/app/bulk", label: "Bulk Campaign", icon: PaperPlane, key: "bulk" },
     { to: "/app/logs", label: "Message Logs", icon: ListBullets, key: "logs" },
     { to: "/app/docs", label: "API Docs", icon: Code, key: "docs" },
-    ...(isAdmin ? [{ to: "/app/customers", label: "Customers", icon: Users, key: "customers" }] : []),
+    ...(isAdmin
+      ? [
+          { to: "/app/customers", label: "Customers", icon: Users, key: "customers" },
+          { to: "/app/plans", label: "Plans", icon: Tag, key: "plans" },
+        ]
+      : [{ to: "/app/billing", label: "Billing", icon: CreditCard, key: "billing" }]),
     { to: "/app/settings", label: "Settings", icon: Gear, key: "settings" },
   ];
 

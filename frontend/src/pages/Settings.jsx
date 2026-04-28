@@ -105,6 +105,34 @@ export default function Settings() {
           with HMAC-SHA256.
         </p>
 
+        {user?.webhook_disabled && (
+          <div className="mt-4 border border-red-300 sharp p-4 bg-red-50" data-testid="webhook-disabled-banner">
+            <p className="font-mono text-[11px] uppercase tracking-widest text-red-700">webhook auto-disabled</p>
+            <p className="text-sm text-red-700 mt-1">
+              We tried to deliver to your endpoint 10 times in a row without success. Fix your endpoint, then click <strong>Re-enable</strong>.
+            </p>
+            <button
+              onClick={async () => {
+                await api.post("/me/webhook/enable");
+                await refresh();
+                toast.success("Webhook re-enabled");
+              }}
+              className="btn-brand text-sm mt-3"
+              data-testid="webhook-enable-btn"
+            >
+              Re-enable
+            </button>
+          </div>
+        )}
+
+        {!user?.webhook_disabled && user?.webhook_consecutive_failures > 0 && (
+          <div className="mt-4 border border-yellow-300 sharp p-3 bg-yellow-50">
+            <p className="font-mono text-[11px] text-yellow-800">
+              {user.webhook_consecutive_failures} recent delivery failure(s). After 10 in a row we'll auto-disable.
+            </p>
+          </div>
+        )}
+
         <form onSubmit={saveWebhook} className="mt-4 space-y-3">
           <div>
             <label className="font-mono text-[11px] uppercase tracking-widest text-neutral-500">
