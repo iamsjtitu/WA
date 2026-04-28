@@ -492,6 +492,200 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             },
         }
 
+    # ------------ v2 / sendDocument ------------
+    # Document attachments (PDF, Word, Excel, PowerPoint, ZIP, …). Accepts EITHER
+    # a multipart `file` upload OR a public `url`. Single-recipient or group.
+    _ALLOWED_DOCUMENT_MIMES = {
+        "application/pdf": ".pdf",
+        "application/msword": ".doc",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+        "application/vnd.ms-excel": ".xls",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+        "application/vnd.ms-powerpoint": ".ppt",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+        "application/zip": ".zip",
+        "application/x-zip-compressed": ".zip",
+        "text/csv": ".csv",
+        "text/plain": ".txt",
+        "application/rtf": ".rtf",
+        "application/vnd.oasis.opendocument.text": ".odt",
+        "application/vnd.oasis.opendocument.spreadsheet": ".ods",
+    }
+
+    @api.post("/v2/sendDocument", status_code=201)
+    async def send_document_v2(
+        request: Request,
+        phonenumber: str = Form(""),
+        groupId: str = Form(""),
+        caption: str = Form(""),
+        file_name: str = Form(""),
+        url: str = Form(""),
+        file: Optional[UploadFile] = File(None),
+    ):
+        """Send a PDF / Word / Excel / PowerPoint / ZIP / etc. as a WhatsApp document.
+
+        Provide either a `file` multipart upload OR a public `url`. Address
+        recipient with either `phonenumber` (1-on-1) or `groupId` (group).
+        """
+        user = await user_from_bearer(request)
+
+        # Validate inputs before touching the WhatsApp session
+        if not phonenumber and not groupId:
+            raise HTTPException(
+                status_code=400, detail="Either phonenumber or groupId is required"
+            )
+        if phonenumber and groupId:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide phonenumber OR groupId — not both",
+            )
+        if not file and not url:
+            raise HTTPException(
+                status_code=400, detail="Either file (multipart) or url is required"
+            )
+        if file and url:
+            raise HTTPException(
+                status_code=400, detail="Provide file OR url — not both"
+            )
+
+        session = await _resolve_session(user["id"])
+
+        # Materialise the document onto disk so the Node service can stream it
+        if file:
+            ext = PathLib(file.filename or "").suffix or ""
+            local = UPLOAD_DIR / f"{new_id()}{ext}"
+            content = await file.read()
+            local.write_bytes(content)
+            mime = (file.content_type or "application/octet-stream").split(";")[0].strip().lower()
+            display_name = file_name or file.filename or local.name
+        else:
+            try:
+                async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as c:
+                    r = await c.get(url)
+                    r.raise_for_status()
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Failed to fetch url: {e}")
+            mime = (
+                r.headers.get("content-type", "application/octet-stream")
+                .split(";")[0]
+                .strip()
+                .lower()
+            )
+            url_path = httpx.URL(url).path
+            ext = (
+                _ALLOWED_DOCUMENT_MIMES.get(mime)
+                or PathLib(url_path).suffix
+                or ""
+            )
+            local = UPLOAD_DIR / f"{new_id()}{ext}"
+            local.write_bytes(r.content)
+            display_name = file_name or PathLib(url_path).name or local.name
+
+        # Quota: 1 message per recipient
+        await enforce_quota(user, 1)
+
+        if phonenumber:
+            phone = normalize_phone(phonenumber)
+            phone = await _maybe_apply_country_code(session, phone)
+            if not phone:
+                raise HTTPException(status_code=400, detail="Invalid phonenumber")
+            msg = await send_media_one(
+                user["id"],
+                session["id"],
+                phone,
+                caption or "",
+                str(local),
+                display_name,
+                mime,
+                "v2_api_document",
+            )
+            if msg["status"] == "sent":
+                await db.users.update_one(
+                    {"id": user["id"]}, {"$inc": {"quota_used": 1}}
+                )
+                return v2_ok(
+                    {
+                        "phonenumber": phone,
+                        "id": msg["id"],
+                        "file_name": display_name,
+                        "mime_type": mime,
+                    },
+                    201,
+                )
+            return {
+                "success": False,
+                "statusCode": 400,
+                "timestamp": now_ts(),
+                "error": msg.get("error") or "send failed",
+                "data": {"phonenumber": phone, "id": msg["id"]},
+            }
+
+        # groupId path — send via Node service group endpoint
+        gid_clean = re.sub(r"[^0-9A-Za-z\-]", "", groupId or "")
+        if not gid_clean:
+            raise HTTPException(status_code=400, detail="Invalid groupId")
+
+        msg_id = new_id()
+        msg_doc = {
+            "id": msg_id,
+            "user_id": user["id"],
+            "session_id": session["id"],
+            "direction": "outbound",
+            "to": gid_clean,
+            "is_group": True,
+            "text": caption or "",
+            "status": "queued",
+            "type": "document",
+            "has_media": True,
+            "file_name": display_name,
+            "mime_type": mime,
+            "source": "v2_api_document",
+            "sent_at": now_iso(),
+            "wa_message_id": None,
+            "error": None,
+        }
+        try:
+            rj = await wa_client.send_media(
+                session["id"],
+                f"{gid_clean}@g.us",
+                str(local),
+                caption or "",
+                display_name,
+                mime,
+                True,
+            )
+            msg_doc["status"] = "sent"
+            msg_doc["wa_message_id"] = rj.get("message_id")
+        except Exception as e:
+            msg_doc["status"] = "failed"
+            msg_doc["error"] = str(e)
+            try:
+                local.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        await db.messages.insert_one(msg_doc)
+        if msg_doc["status"] == "sent":
+            await db.users.update_one(
+                {"id": user["id"]}, {"$inc": {"quota_used": 1}}
+            )
+            return v2_ok(
+                {
+                    "groupId": gid_clean,
+                    "id": msg_id,
+                    "file_name": display_name,
+                    "mime_type": mime,
+                },
+                201,
+            )
+        return {
+            "success": False,
+            "statusCode": 400,
+            "timestamp": now_ts(),
+            "error": msg_doc.get("error") or "send failed",
+            "data": {"groupId": gid_clean, "id": msg_id},
+        }
+
     # Drop-in compatible with 360messenger's exact path + payload
     @api.get("/v2/groupChat/getGroupList")
     async def group_chat_get_group_list(request: Request):

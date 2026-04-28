@@ -366,7 +366,8 @@ app.post("/sessions/:id/send-media", async (req, res) => {
     return res.status(400).json({ error: "file not found at path" });
   }
   try {
-    const jid = jidFromPhone(to);
+    const toStr = String(to);
+    const jid = toStr.includes("@") ? toStr : jidFromPhone(toStr);
     const mt = String(mime_type || "").toLowerCase();
     let payload;
     if (mt.startsWith("image/")) {

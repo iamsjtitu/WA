@@ -35,6 +35,7 @@ const SECTIONS = [
     title: "WhatsApp API v2.0",
     items: [
       { id: "v2-send", label: "Send Message", method: "POST" },
+      { id: "v2-document", label: "Send Document (PDF/Word/Excel)", method: "POST" },
       { id: "v2-group", label: "Send Group Message", method: "POST" },
       { id: "v2-groups-list", label: "Get Group List", method: "GET" },
       { id: "v2-status", label: "Get Message Status", method: "GET" },
@@ -310,6 +311,92 @@ echo curl_exec($ch);`,
   "data": {
     "phonenumber": "447488888888",
     "id": "bcf2b4f0-73f7-4235-b691-e9b08a5aa0b9"
+  }
+}`,
+      },
+    },
+    {
+      id: "v2-document",
+      method: "POST",
+      path: "/v2/sendDocument",
+      title: "Send Document (PDF / Word / Excel)",
+      description:
+        "Attach a PDF, Word, Excel, PowerPoint, ZIP, CSV or any other file as a WhatsApp document. Provide either a multipart file upload OR a public URL. Address either a phonenumber (1-on-1) or a groupId.",
+      auth: "Bearer Token (your API key)",
+      params: [
+        { name: "phonenumber", type: "string", required: false, desc: "Recipient phone (international, no +). Required if groupId not set." },
+        { name: "groupId", type: "string", required: false, desc: "Group id (without @g.us). Required if phonenumber not set." },
+        { name: "file", type: "binary", required: false, desc: "Multipart file upload (recommended for PDFs/Word). Required if url not set." },
+        { name: "url", type: "string", required: false, desc: "Public URL of the document. Required if file not set." },
+        { name: "file_name", type: "string", required: false, desc: "Display name shown to the recipient (defaults to upload's filename)." },
+        { name: "caption", type: "string", required: false, desc: "Optional caption shown beside the document." },
+      ],
+      samples: {
+        cURL: `# Direct file upload (recommended for PDFs / Word)
+curl --location '${API_BASE}/v2/sendDocument' \\
+  --header 'Authorization: Bearer YOUR_API_KEY' \\
+  --form 'phonenumber="447488888888"' \\
+  --form 'caption="Q3 invoice attached"' \\
+  --form 'file=@/path/to/invoice.pdf'
+
+# Or, send from a public URL:
+curl --location '${API_BASE}/v2/sendDocument' \\
+  --header 'Authorization: Bearer YOUR_API_KEY' \\
+  --form 'phonenumber="447488888888"' \\
+  --form 'file_name="report.docx"' \\
+  --form 'url="https://example.com/files/report.docx"'`,
+        Python: `import requests
+
+with open("invoice.pdf", "rb") as fh:
+    r = requests.post(
+        "${API_BASE}/v2/sendDocument",
+        headers={"Authorization": "Bearer YOUR_API_KEY"},
+        data={
+            "phonenumber": "447488888888",
+            "caption": "Q3 invoice attached",
+        },
+        files={"file": ("invoice.pdf", fh, "application/pdf")},
+    )
+print(r.json())`,
+        Node: `import fs from "node:fs";
+import FormData from "form-data";
+import fetch from "node-fetch";
+
+const form = new FormData();
+form.append("phonenumber", "447488888888");
+form.append("caption", "Q3 invoice attached");
+form.append("file", fs.createReadStream("./invoice.pdf"));
+
+const res = await fetch("${API_BASE}/v2/sendDocument", {
+  method: "POST",
+  headers: { Authorization: "Bearer YOUR_API_KEY" },
+  body: form,
+});
+console.log(await res.json());`,
+        PHP: `$ch = curl_init('${API_BASE}/v2/sendDocument');
+curl_setopt_array($ch, [
+  CURLOPT_RETURNTRANSFER => true,
+  CURLOPT_POST => true,
+  CURLOPT_HTTPHEADER => ['Authorization: Bearer YOUR_API_KEY'],
+  CURLOPT_POSTFIELDS => [
+    'phonenumber' => '447488888888',
+    'caption' => 'Q3 invoice attached',
+    'file' => new CURLFile('/path/to/invoice.pdf', 'application/pdf', 'invoice.pdf'),
+  ],
+]);
+echo curl_exec($ch);`,
+      },
+      response: {
+        status: 201,
+        body: `{
+  "success": true,
+  "statusCode": 201,
+  "timestamp": "2026-04-28 17:02:10",
+  "data": {
+    "phonenumber": "447488888888",
+    "id": "bcf2b4f0-73f7-4235-b691-e9b08a5aa0b9",
+    "file_name": "invoice.pdf",
+    "mime_type": "application/pdf"
   }
 }`,
       },
@@ -809,7 +896,7 @@ export default function DeveloperDocs() {
             </p>
           </section>
           {endpoints
-            .filter((e) => e.id.startsWith("v2-"))
+            .filter((e) => e.id.startsWith("v2-") || e.id === "v2-document")
             .map((e) => (
               <Endpoint key={e.id} {...e} />
             ))}
