@@ -9,8 +9,8 @@ import threading
 import time
 from pathlib import Path
 
-WA_DIR = Path("/app/wa-service")
-LOG_FILE = Path("/var/log/supervisor/wa-service.log")
+WA_DIR = Path(os.environ.get("WA_SERVICE_DIR", "/app/wa-service"))
+LOG_FILE = Path(os.environ.get("WA_SERVICE_LOG", "/var/log/supervisor/wa-service.log"))
 WA_PORT = int(os.environ.get("WA_PORT", "3001"))
 
 _proc: subprocess.Popen | None = None
