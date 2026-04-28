@@ -1,0 +1,110 @@
+{
+  "theme": "LIGHT",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "vibe": "Authoritative, modern, developer-first API platform. High contrast, clean grid borders, technical but accessible.",
+  "typography": {
+    "headings": {
+      "font_family": "Outfit",
+      "import_instructions": "Import Outfit from Google Fonts",
+      "weight": "font-medium to font-bold",
+      "letter_spacing": "tracking-tight",
+      "usage": "Use for all main headings (H1-H4). Maximum text-6xl for Hero H1."
+    },
+    "body": {
+      "font_family": "IBM Plex Sans",
+      "import_instructions": "Import IBM Plex Sans from Google Fonts",
+      "weight": "font-normal",
+      "usage": "Paragraphs, labels, and standard text elements."
+    },
+    "mono": {
+      "font_family": "JetBrains Mono",
+      "import_instructions": "Import JetBrains Mono from Google Fonts",
+      "weight": "font-normal",
+      "usage": "API keys, code snippets, numbers, statistics, and small technical overlines."
+    }
+  },
+  "color_palette": {
+    "background": {
+      "primary": "#FFFFFF",
+      "secondary": "#F8F9FA",
+      "dark_section": "#0A0A0A"
+    },
+    "text": {
+      "primary": "#0A0A0A",
+      "secondary": "#4B5563",
+      "muted": "#9CA3AF",
+      "on_dark": "#FFFFFF",
+      "on_dark_muted": "#A1A1AA"
+    },
+    "borders": {
+      "light": "#E5E7EB",
+      "dark": "#27272A",
+      "focus": "#002FA7"
+    },
+    "brand": {
+      "primary": "#002FA7",
+      "primary_hover": "#00258A",
+      "accent": "#EDFF00",
+      "success": "#10B981",
+      "error": "#EF4444"
+    }
+  },
+  "layout_spacing": {
+    "philosophy": "Generous spacing. Use p-8 to p-12 for major sections.",
+    "container_max_width": "max-w-7xl mx-auto",
+    "grid_system": "Bento grids for features. Strict structural grids for the dashboard. Use 'border-collapse' style grid layouts to expose the grid visually.",
+    "border_radius": "rounded-none or max rounded-sm (4px) to maintain a sharp, technical feel."
+  },
+  "surface_strategies": {
+    "marketing_header": "Crystal Glass: bg-white/80 backdrop-blur-xl border-b border-gray-200. Must have z-50.",
+    "dashboard_cards": "Flat solid background (#FFFFFF), sharp 1px border (#E5E7EB), no shadow by default. Hover adds shadow-sm and slightly darkens border.",
+    "code_blocks": "Deep black (#0A0A0A) background, JetBrains Mono font, light gray text, with subtle border.",
+    "buttons": "Primary buttons: bg-[#002FA7] text-white hover:bg-[#00258A]. Accent buttons: bg-[#EDFF00] text-[#0A0A0A] hover:bg-[#D4E600]. Sharp corners (rounded-sm)."
+  },
+  "motion_interactions": {
+    "hover_states": "Buttons must have explicit hover states (e.g. hover:bg-opacity-90). Cards lift slightly (-translate-y-0.5) with border color change.",
+    "transitions": "Use specific properties: transition-all duration-200 ease-in-out.",
+    "animations": "Subtle fade-in for lists/tables. Use Framer Motion for complex dashboard tab switches."
+  },
+  "media": {
+    "hero_image": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/c886f125-d086-4094-8bc3-2ea1fd8073ad/images/3b189c41c6e6a4666ebc480c7ae4bc9548566bdb34ba787ab947a0c495ff8006.png",
+      "description": "Abstract 3D technical illustration of connected nodes and data pipelines representing API messaging.",
+      "placement": "Landing page hero section right side or background with low opacity overlay."
+    },
+    "feature_image": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/c886f125-d086-4094-8bc3-2ea1fd8073ad/images/b975bfd4626a66f6deab15506e1e8136b6bc6d7c0a17cba1712e0e949496892b.png",
+      "description": "Abstract geometric representation of data packets being delivered.",
+      "placement": "Landing page features section or API docs preview."
+    },
+    "developer_context": {
+      "url": "https://images.pexels.com/photos/34804020/pexels-photo-34804020.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Close-up view of code on screen.",
+      "placement": "API Documentation section or Developer tools highlight."
+    },
+    "sponsor_logos": [
+      "https://images.unsplash.com/photo-1586867026567-b9b63ae58472?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDV8MHwxfHNlYXJjaHw0fHxicmFuZCUyMGxvZ28lMjB3aGl0ZSUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzc3MzYxNjY0fDA&ixlib=rb-4.1.0&q=85",
+      "https://images.pexels.com/photos/9949426/pexels-photo-9949426.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+    ]
+  },
+  "component_instructions": {
+    "forms": "Use Shadcn Form, Input, Select. Keep inputs sharp (rounded-sm) with focus-visible:ring-[#002FA7].",
+    "tables": "Use Shadcn Table. Dense layout. Right-align numeric data. Use JetBrains Mono for IDs and Status badges.",
+    "charts": "Use Recharts (or Shadcn Charts). Lines/Bars should use the primary brand color (#002FA7). Clean tooltips.",
+    "modals": "Use Shadcn Dialog for QR code scanning and adding new customers. Backdrop blur is mandatory for overlays.",
+    "alerts": "Use Sonner for toast notifications. Top-right positioning.",
+    "testing": "All interactive elements MUST have data-testid attributes (e.g., data-testid='login-submit-button')."
+  },
+  "iconography": {
+    "library": "@phosphor-icons/react",
+    "style": "Use regular or duotone weights for dashboard, bold for marketing highlights.",
+    "installation_command": "yarn add @phosphor-icons/react"
+  },
+  "main_agent_instructions": [
+    "Build the Landing Page in pure React/Tailwind (no Shadcn layout containers) using strict grid and large typography.",
+    "Build the Dashboard using a dense layout, Shadcn components (Cards, Tables, Dialogs), and a fixed sidebar or top nav.",
+    "Do NOT use typical WhatsApp green (#25D366) as the primary brand color. Rely on the defined high-contrast Blue/Black/Yellow palette to stand out.",
+    "Ensure the QR code modal for linking WhatsApp sessions feels native and secure (blur background, clear instructions).",
+    "Include code snippets styled similarly to Vercel/Stripe in the API Documentation section."
+  ]
+}
