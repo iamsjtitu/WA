@@ -492,4 +492,28 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             },
         }
 
+    # Drop-in compatible with 360messenger's exact path + payload
+    @api.get("/v2/groupChat/getGroupList")
+    async def group_chat_get_group_list(request: Request):
+        """Drop-in compatible with 360messenger /v2/groupChat/getGroupList."""
+        user = await user_from_bearer(request)
+        session = await _resolve_session(user["id"])
+        try:
+            result = await wa_client.list_groups(session["id"])
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        groups = [
+            {
+                "id": g.get("jid") or (f"{g['id']}@g.us" if g.get("id") else ""),
+                "name": g.get("subject") or "",
+                "size": g.get("size", 0),
+            }
+            for g in result.get("groups", [])
+        ]
+        return {
+            "success": True,
+            "statusCode": 200,
+            "data": {"groups": groups},
+        }
+
     return api

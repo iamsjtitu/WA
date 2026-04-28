@@ -36,7 +36,7 @@ const SECTIONS = [
     items: [
       { id: "v2-send", label: "Send Message", method: "POST" },
       { id: "v2-group", label: "Send Group Message", method: "POST" },
-      { id: "v2-groups-list", label: "List Groups", method: "GET" },
+      { id: "v2-groups-list", label: "Get Group List", method: "GET" },
       { id: "v2-status", label: "Get Message Status", method: "GET" },
       { id: "v2-sent", label: "List Sent Messages", method: "GET" },
       { id: "v2-recv", label: "List Received Messages", method: "GET" },
@@ -366,46 +366,43 @@ console.log(await r.json());`,
     {
       id: "v2-groups-list",
       method: "GET",
-      path: "/v2/groups",
-      title: "List Groups",
+      path: "/v2/groupChat/getGroupList",
+      title: "Get Group List",
       description:
-        "Returns every WhatsApp group your connected session is a member of, including group id, subject, member count, and admin status. Use the returned id with sendGroup.",
+        "Drop-in compatible with the 360messenger /groupChat/getGroupList endpoint. Returns every WhatsApp group the connected session is a member of, in the exact { id, name, size } shape.",
       auth: "Bearer Token",
       samples: {
-        cURL: `curl '${API_BASE}/v2/groups' \\
+        cURL: `curl '${API_BASE}/v2/groupChat/getGroupList' \\
   --header 'Authorization: Bearer YOUR_API_KEY'`,
         Python: `import requests
 r = requests.get(
-    "${API_BASE}/v2/groups",
+    "${API_BASE}/v2/groupChat/getGroupList",
     headers={"Authorization": "Bearer YOUR_API_KEY"},
 )
-for g in r.json()["result"]["data"]:
-    print(g["id"], g["subject"], g["size"])`,
-        Node: `const r = await fetch("${API_BASE}/v2/groups", {
+for g in r.json()["data"]["groups"]:
+    print(g["id"], g["name"])`,
+        Node: `const r = await fetch("${API_BASE}/v2/groupChat/getGroupList", {
   headers: { Authorization: "Bearer YOUR_API_KEY" },
 });
-const { result } = await r.json();
-console.log(result.data);`,
+const { data } = await r.json();
+console.log(data.groups);`,
       },
       response: {
         status: 200,
         body: `{
   "success": true,
   "statusCode": 200,
-  "result": {
-    "count": 2,
-    "data": [
+  "data": {
+    "groups": [
       {
-        "id": "1203********",
-        "jid": "1203********@g.us",
-        "subject": "Marketing Team",
-        "desc": "Internal announcements",
-        "owner": "447488888888",
-        "creation": 1716893012,
-        "size": 14,
-        "announce": false,
-        "restrict": false,
-        "is_admin": true
+        "id": "120363xxxxxxxxxxxx@g.us",
+        "name": "Family Group",
+        "size": 8
+      },
+      {
+        "id": "120363yyyyyyyyyyy@g.us",
+        "name": "Mill Staff",
+        "size": 14
       }
     ]
   }
