@@ -10,14 +10,20 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import threading
+import time
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
 logger = logging.getLogger("wa9x.system")
 
 LOG_PATH = "/var/log/wa9x-update.log"
+
+# In-memory guard against concurrent update spawns
+_UPDATE_LOCK = threading.Lock()
+_UPDATE_TS = {"started_at": 0.0}
+_UPDATE_COOLDOWN_SECONDS = 30  # block a second click within this window
 
 
 def _install_dir() -> Path:
@@ -60,7 +66,8 @@ def make_router(admin_only):
 
         rc, current_commit, _ = _run(["git", "rev-parse", "HEAD"])
         rc, short_commit, _ = _run(["git", "rev-parse", "--short", "HEAD"])
-        rc, branch, _ = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+        rc, branch_raw, _ = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+        branch = (branch_raw or "").strip() or "main"
         rc, last_msg, _ = _run(["git", "log", "-1", "--pretty=%s|%an|%ai"])
 
         # fetch to learn what's behind (may take a few seconds)
@@ -68,7 +75,7 @@ def make_router(admin_only):
         fetch_ok = rc == 0
 
         rc, behind_str, _ = _run(
-            ["git", "rev-list", "--count", f"HEAD..origin/{branch.strip() or 'main'}"]
+            ["git", "rev-list", "--count", f"HEAD..origin/{branch}"]
         )
         try:
             behind = int(behind_str.strip())
@@ -83,7 +90,7 @@ def make_router(admin_only):
                 "--oneline",
                 "-n",
                 "10",
-                f"HEAD..origin/{branch.strip() or 'main'}",
+                f"HEAD..origin/{branch}",
             ]
         )
 
@@ -91,7 +98,7 @@ def make_router(admin_only):
             {
                 "commit": current_commit.strip(),
                 "short_commit": short_commit.strip(),
-                "branch": branch.strip(),
+                "branch": branch,
                 "last_commit": last_msg.strip(),
                 "behind_count": behind,
                 "fetch_ok": fetch_ok,
@@ -136,17 +143,36 @@ def make_router(admin_only):
                 status_code=500, detail=f"Auto-update script not found at {script}"
             )
 
-        # Detach the script so it survives a backend supervisor restart
+        # Prevent concurrent spawns within a short cooldown window
+        now = time.time()
+        with _UPDATE_LOCK:
+            if now - _UPDATE_TS["started_at"] < _UPDATE_COOLDOWN_SECONDS:
+                raise HTTPException(
+                    status_code=409,
+                    detail="An update was just started — please wait for it to finish.",
+                )
+            _UPDATE_TS["started_at"] = now
+
+        # Detach the script so it survives a backend supervisor restart.
+        # Open the log file, hand it to the child, then close our copy so
+        # the long-lived FastAPI worker doesn't leak fds across updates.
         try:
+            try:
+                os.chmod(script, 0o755)
+            except OSError:
+                pass  # filesystem may be read-only; bash invocation still works
             log_fh = open(LOG_PATH, "ab", buffering=0)
-            subprocess.Popen(
-                ["nohup", "bash", str(script)],
-                stdout=log_fh,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-                cwd=str(install),
-                env={**os.environ, "INSTALL_DIR": str(install)},
-            )
+            try:
+                subprocess.Popen(
+                    ["nohup", "bash", str(script)],
+                    stdout=log_fh,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                    cwd=str(install),
+                    env={**os.environ, "INSTALL_DIR": str(install)},
+                )
+            finally:
+                log_fh.close()
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to start update: {e}")
 

@@ -28,6 +28,9 @@
 | 3 | 72/72 | Webhook retry/auto-disable, inbound media download, CSV+templates, admin Plans CRUD, Stripe + Razorpay + PayPal billing |
 | 4 | 94/94 | v2 API compat layer (sendMessage/sendGroup/status/sentMessages/receivedMessages/account), schedule/delay dispatcher (60s loop), per-session settings, ServiceDetail page, WHMCS+WooCommerce plugins |
 | 5 | 110+1/111 | **Full rebrand to wa.9x.design** + **5-step ServiceCreate wizard** with Baileys phone-number pairing-code support, green theme, terminology refresh |
+| 6 | — | Customer impersonation flow + admin credential change + Made-with-Emergent badge removal + VPS setup script |
+| 7 | — | (Save to GitHub + handoff) |
+| 8 | 18/18 + 72/72 reg | **Admin Auto-Update from GitHub**: `/api/admin/system/{status,log,update}` + `AdminSystem.jsx` page with live log tail, behind-count, defensive fetch, concurrent-update lock, fd leak fix |
 
 ### Iteration 5 — wa.9x.design Rebrand & Pairing Code (110/111 + 1 fix = 111/111)
 - ✅ Mass rebrand: WapiHub→wa.9x.design, 360messenger refs purged, color blue→green, api key prefix wapi_→wa9x_
@@ -88,3 +91,14 @@ PAYPAL_MODE=sandbox|live, PAYPAL_CLIENT_ID, PAYPAL_SECRET, PAYPAL_WEBHOOK_ID
 2. **Real WhatsApp link** — admin@wa.9x.design → /app/sessions/new → choose method → live test send/receive.
 3. **Add gateway keys** to `/app/backend/.env`, restart, register webhook URLs at each provider.
 4. **Plugins** — install WHMCS / WooCommerce plugins on dev sites and verify event firing.
+5. **Auto-Update on VPS** — after first push to GitHub, re-deploy with
+   `bash setup-vps.sh --git <your-repo-url>`. Then any future “Save to GitHub” can be pulled
+   one-click via Admin → System → **Update Now**. The log tails live at
+   `/var/log/wa9x-update.log`.
+
+## Auto-Update endpoints (admin only)
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/api/admin/system/status` | install_dir, git_available, commit, short_commit, branch, last_commit, behind_count, fetch_ok, fetch_error, incoming_commits, last_update_at |
+| GET | `/api/admin/system/log?lines=N` | `{log, exists}` — tails `/var/log/wa9x-update.log` |
+| POST | `/api/admin/system/update` | spawns detached `deploy/auto-update.sh`; 30 s cooldown between calls; 400 if not a git checkout |
