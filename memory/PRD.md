@@ -4,57 +4,77 @@
 "kya hum 360messenger.com jaisa khud ka bana sakte hai?" — Build own WhatsApp messaging API platform for personal/reseller use, give API access to customers.
 
 ## Architecture
-- **Node.js Baileys microservice** (`/app/wa-service/`, port 3001 internal) — auto-spawned by FastAPI on startup with watchdog auto-respawn. AUTH dir configurable via `WA_AUTH_DIR` env.
-- **FastAPI backend** (`/app/backend/`, port 8001) — auth, customer mgmt, message logs, webhooks, public API. Proxies WA ops to Node service.
-- **React frontend** (`/app/frontend/`) — Landing + Auth + Admin/Customer dashboards.
-
-## User Personas
-1. **Admin (Reseller / Owner)** — manages customer accounts, quotas, API keys, platform stats.
-2. **Customer** — links own WhatsApp via QR, gets API key, sends + receives messages programmatically with webhook.
+- **Node.js Baileys microservice** (`/app/wa-service/`, port 3001 internal) — auto-spawned by FastAPI, watchdog auto-respawn, configurable AUTH dir via WA_AUTH_DIR. Inbound msgs auto-downloaded for media.
+- **FastAPI backend** (`/app/backend/`, port 8001) — auth, customer mgmt, message logs, webhooks, public API, plans, billing.
+  - `server.py` — core (auth, sessions, messages, webhooks)
+  - `billing.py` — plans CRUD + Stripe/Razorpay/PayPal subscription billing
+  - `auth.py` — JWT helpers
+  - `wa_client.py` / `wa_supervisor.py` — Node service control
+- **React frontend** — Landing + Auth + Admin/Customer dashboards.
 
 ## What's Been Implemented
 
-### 2026-04-28 — MVP (Iteration 1)
-- ✅ JWT auth with httpOnly cookies (admin + customer roles), bcrypt password hashing
-- ✅ Admin endpoints: customer CRUD, key regeneration, platform stats, RBAC
-- ✅ Customer endpoints: profile, key rotation, stats
-- ✅ WhatsApp sessions: create/list/status/delete via Baileys multi-session
-- ✅ Outbound messaging: dashboard send (single + bulk with 0.6s throttle), message logs
-- ✅ Public API: `POST /api/v1/messages` and `GET /api/v1/sessions` via X-API-Key header
-- ✅ Frontend: Landing (Swiss high-contrast), Login/Register, Dashboard layout
-- ✅ Pages: Overview, Sessions (QR modal), Send, Bulk, Logs, API Docs, Customers (admin), Settings
-- ✅ 29/29 backend tests pass
+### 2026-04-28 — Iteration 1 (MVP)
+JWT auth, admin+customer roles, sessions CRUD, send/bulk text, message logs, public API (X-API-Key), landing page. **29/29 tests**.
 
 ### 2026-04-28 — Iteration 2 (Webhooks + Media + Resilience)
-- ✅ **Inbound webhooks** with HMAC-SHA256 signature: `PATCH /api/me/webhook`, `DELETE /api/me/webhook`, `POST /api/me/webhook/test`
-- ✅ **Internal inbound endpoint** `POST /api/internal/inbound` (X-Internal-Secret auth) — Node forwards every received WhatsApp msg here, FastAPI stores it (direction='inbound') and fires the per-user webhook
-- ✅ **Media attachments**: 
-  - Dashboard: `POST /api/messages/send-media` (multipart, 25MB cap, image/video/audio/pdf/doc)
-  - Public API: `POST /api/v1/messages` accepts `media_url` field (we download server-side and forward)
-- ✅ **Persistence**: AUTH dir configurable via `WA_AUTH_DIR` env; uploads land in `/app/wa-service/uploads/` (deleted after send)
-- ✅ **Resilience**: watchdog thread auto-respawns Node if it dies; port-conflict check prevents double-spawn (compatible with future supervisor takeover)
-- ✅ Frontend: Settings → Webhook URL form + signing secret display, SendMessage → Text/Media tabs with file picker, ApiDocs → media + webhook payload + verify signature snippets (Node + Python), MessageLogs → direction column + filter
-- ✅ 46/46 backend tests pass (17 new + 29 carryover)
+Inbound webhooks (HMAC), internal Node→FastAPI inbound endpoint, dashboard media upload (multipart, 25MB), public API media_url, watchdog respawn, port-conflict check. **+17 tests, 46/46 total**.
 
-## Known Minor Items (Non-Blocking)
-- `server.py` is ~940 lines — should be split into routers when adding more endpoints
-- `/messages/send-media` buffers full file before 25MB check (acceptable at this size)
-- `media_url` download doesn't enforce a max-size limit on response body (consider streaming guard)
-- Webhook delivery failures are silently logged — no auto-disable after N consecutive failures (yet)
+### 2026-04-28 — Iteration 3 (Billing + CSV + Retries + Inbound Media)
+- ✅ **Webhook retry**: exp backoff [2s, 6s, 18s] + auto-disable after 10 consecutive failures + per-user counter + `/api/me/webhook/enable` to re-arm. `/test` endpoint now fires async (non-blocking).
+- ✅ **Inbound media download**: Node downloads media via `downloadMediaMessage`, stores at `/app/wa-service/uploads/inbound/<msg_id>.<ext>`. FastAPI serves at `/api/media/{message_id}` (auth via cookie or X-API-Key). Webhook payload includes `media_url`, `mime_type`, `file_name`.
+- ✅ **CSV bulk send**: `POST /api/messages/bulk-csv` (multipart) — auto-detects phone column, renders `{{var}}` template per row, throttled.
+- ✅ **Admin Plans CRUD**: `/api/admin/plans` (POST/GET/PATCH/DELETE) + public `/api/plans` for active plans. Plan model: name, price, currency, quota_monthly, max_sessions, features[], active, sort.
+- ✅ **3-gateway billing**:
+  - **Stripe**: Checkout Session via `POST /billing/stripe/checkout`, webhook on `/webhooks/stripe`, cancel on `/billing/stripe/cancel`. Auto-creates Product+Price in Stripe on first checkout.
+  - **Razorpay**: Subscription via `POST /billing/razorpay/create-subscription`, webhook on `/webhooks/razorpay`, cancel on `/billing/razorpay/cancel`. Auto-creates RP Plan on first subscription.
+  - **PayPal**: Subscription via `POST /billing/paypal/create-subscription`, return handler at `/billing/paypal/return`, webhook on `/webhooks/paypal`, cancel on `/billing/paypal/cancel`. Auto-creates Product+Plan.
+  - All gateways return 400 "not configured" if env keys missing — graceful degradation.
+- ✅ **Subscription state**: `subscriptions` collection with active/cancelled/past_due/superseded states. Activates → user.quota_monthly = plan.quota_monthly. Cancelled → reset to 1000 free tier.
+- ✅ **Frontend**: AdminPlans (CRUD), Billing (customer view with 3 gateway buttons + cancel), Settings webhook auto-disable banner with re-enable button, BulkSend CSV tab + variable preview.
+- ✅ **72/72 tests pass**.
 
-## Prioritized Backlog
-- **P1**: Production deployment — point `WA_AUTH_DIR` to a persistent volume so QR linkings survive redeploys
+## Configuration (env vars)
+```
+# WhatsApp
+WA_AUTH_DIR=/app/wa-service/auth   (production: point to persistent volume)
+INTERNAL_SECRET=<long-random>
+BACKEND_PUBLIC_URL=<https url>
+FRONTEND_URL=<https url>
+
+# Payment gateways (admin fills)
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+RAZORPAY_WEBHOOK_SECRET=
+PAYPAL_MODE=sandbox|live
+PAYPAL_CLIENT_ID=
+PAYPAL_SECRET=
+PAYPAL_WEBHOOK_ID=
+```
+
+## Webhook URLs to register at gateways
+- Stripe → `{BACKEND_PUBLIC_URL}/api/webhooks/stripe`
+- Razorpay → `{BACKEND_PUBLIC_URL}/api/webhooks/razorpay`
+- PayPal → `{BACKEND_PUBLIC_URL}/api/webhooks/paypal`
+
+## Backlog / Known Improvements (Non-Blocking)
+- **P1**: Bulk CSV with 500+ rows hits ingress timeout — push to background job/queue with status polling
 - **P1**: Rate limiting & brute-force lockout on `/auth/login`
-- **P2**: CSV upload for bulk + `{{name}}` template variables
-- **P2**: Stripe/Razorpay subscription billing for plan upgrades
-- **P2**: Webhook retry with exponential backoff + auto-disable after N consecutive failures
-- **P2**: Inbound media download — currently we only flag `has_media:true`; download & store would let customers receive images via webhook payload
-- **P3**: Password reset flow
-- **P3**: Whitelabel custom domain per customer
-- **P3**: Group chat support (currently filtered out)
-- **P3**: Two-factor authentication
+- **P2**: Stripe Customer Portal for self-service billing management
+- **P2**: PayPal webhook signature verification via `/v1/notifications/verify-webhook-signature`
+- **P2**: Razorpay webhook secret enforcement (warn-log when missing in production)
+- **P2**: Plan price stored as float — should be Decimal/cents for accuracy
+- **P2**: Currency allowlist on plan creation
+- **P2**: Add jitter to webhook retry backoff
+- **P2**: Make `WEBHOOK_AUTO_DISABLE_AFTER` configurable per-user/env
+- **P3**: Move inbound media to S3-style storage for horizontal scale
+- **P3**: Refactor server.py (1140 lines) into routers
+- **P3**: Group chat support, password reset, 2FA, whitelabel domains
 
 ## Next Tasks
-1. Manual end-to-end QR scan + real send/receive verification by user with their own WhatsApp number.
-2. Deploy + configure persistent volume for `WA_AUTH_DIR`.
-3. Decide on the first paid tier feature: webhook retry policy, or CSV+template variables.
+1. **User**: Manual end-to-end QR scan + real send/receive on a real WhatsApp number.
+2. **User**: Add Stripe / Razorpay / PayPal API keys to `/app/backend/.env`, restart backend, test live checkout.
+3. **User**: Configure webhook URLs at each gateway dashboard (URLs above).
+4. Add background job system (Celery/RQ) for bulk CSV sends.

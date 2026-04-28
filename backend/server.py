@@ -788,7 +788,8 @@ async def test_webhook(user: dict = Depends(current_user)):
         "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
         "has_media": False,
     }
-    await fire_webhook(user["id"], payload)
+    # Fire-and-forget so the dashboard button doesn't block on retries
+    asyncio.create_task(fire_webhook(user["id"], payload))
     return {"sent": True}
 
 
