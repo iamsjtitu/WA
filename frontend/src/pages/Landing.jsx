@@ -33,7 +33,7 @@ export default function Landing() {
             <a href="#features" className="hover:text-neutral-950">Features</a>
             <a href="#how" className="hover:text-neutral-950">How it works</a>
             <a href="#pricing" className="hover:text-neutral-950">Pricing</a>
-            <a href="#api" className="hover:text-neutral-950">Docs</a>
+            <Link to="/developer" className="hover:text-neutral-950" data-testid="nav-docs-link">Docs</Link>
           </nav>
           <div className="flex items-center gap-2">
             <Link to="/login" className="btn-ghost text-sm" data-testid="nav-login-btn">

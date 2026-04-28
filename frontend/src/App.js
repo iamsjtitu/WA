@@ -16,6 +16,7 @@ import ApiDocs from "./pages/ApiDocs";
 import Customers from "./pages/Customers";
 import AdminPlans from "./pages/AdminPlans";
 import AdminSystem from "./pages/AdminSystem";
+import DeveloperDocs from "./pages/DeveloperDocs";
 import Billing from "./pages/Billing";
 import Settings from "./pages/Settings";
 import { Toaster } from "sonner";
@@ -47,6 +48,8 @@ function App() {
         <Toaster position="top-right" richColors closeButton />
         <Routes>
           <Route path="/" element={<Landing />} />
+          <Route path="/developer" element={<DeveloperDocs />} />
+          <Route path="/docs" element={<DeveloperDocs />} />
           <Route
             path="/login"
             element={
