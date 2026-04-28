@@ -42,6 +42,7 @@ def v2_ok(data: dict, status: int = 201) -> dict:
         "success": True,
         "statusCode": status,
         "timestamp": now_ts(),
+        "error": "",
         "data": data,
     }
 
@@ -53,6 +54,99 @@ def v2_err(message: str, status: int = 400) -> dict:
         "timestamp": now_ts(),
         "error": message,
     }
+
+_GROUP_ID_PATTERN = re.compile(r"^(\d+)(?:@g\.us)?$")
+
+
+def normalize_group_id(group_id: str) -> tuple[str, str]:
+    """Accept either '120363xxx' or '120363xxx@g.us' and return (digits, jid).
+
+    Raises HTTPException(400) with a clear message on invalid input.
+    """
+    raw = (group_id or "").strip()
+    m = _GROUP_ID_PATTERN.match(raw)
+    if not m:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid groupId format. Expected <number>@g.us",
+        )
+    digits = m.group(1)
+    return digits, f"{digits}@g.us"
+
+
+# WhatsApp 100 MB cap on outbound media.
+MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024
+ALLOWED_MIME_PREFIXES = ("image/", "video/")
+ALLOWED_MIME_EXACT = {
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/zip",
+    "application/x-zip-compressed",
+    "text/csv",
+    "text/plain",
+    "application/rtf",
+    "application/vnd.oasis.opendocument.text",
+    "application/vnd.oasis.opendocument.spreadsheet",
+}
+EXT_TO_MIME = {
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".zip": "application/zip",
+    ".csv": "text/csv",
+    ".txt": "text/plain",
+    ".rtf": "application/rtf",
+    ".odt": "application/vnd.oasis.opendocument.text",
+    ".ods": "application/vnd.oasis.opendocument.spreadsheet",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+}
+
+
+def detect_mime(content_type: Optional[str], filename: Optional[str]) -> str:
+    """Trust the extension when filename is given, else fall back to content-type."""
+    name = (filename or "").lower()
+    for ext, mime in EXT_TO_MIME.items():
+        if name.endswith(ext):
+            return mime
+    if content_type:
+        return content_type.split(";")[0].strip().lower()
+    return "application/octet-stream"
+
+
+def is_mime_allowed(mime: str) -> bool:
+    if not mime:
+        return False
+    if mime in ALLOWED_MIME_EXACT:
+        return True
+    return any(mime.startswith(p) for p in ALLOWED_MIME_PREFIXES)
+
+
+def file_type_label(mime: str, filename: Optional[str]) -> str:
+    """A short fileType label suitable for the response body (e.g. 'pdf')."""
+    if filename:
+        suffix = PathLib(filename).suffix.lstrip(".").lower()
+        if suffix:
+            return suffix
+    if "/" in mime:
+        return mime.split("/")[1].lower()
+    return mime.lower()
+
+
 
 
 def parse_delay(delay_str: str) -> Optional[datetime]:
@@ -205,7 +299,6 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             "error": msg.get("error") or "send failed",
             "data": {"phonenumber": phone, "id": msg["id"]},
         }
-
     # ------------ v2 / sendGroup ------------
     @api.post("/v2/sendGroup")
     async def send_group_v2(
@@ -216,10 +309,9 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
         delay: str = Form(""),
     ):
         user = await user_from_bearer(request)
+        # Validate groupId format BEFORE touching the session
+        gid_digits, gid_jid = normalize_group_id(groupId)
         session = await _resolve_session(user["id"])
-        gid_clean = re.sub(r"[^0-9A-Za-z\-]", "", groupId or "")
-        if not gid_clean:
-            raise HTTPException(status_code=400, detail="Invalid groupId")
 
         when = parse_delay(delay) if delay else None
         if when and when > datetime.now(timezone.utc):
@@ -230,7 +322,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
                     "user_id": user["id"],
                     "session_id": session["id"],
                     "type": "group",
-                    "target": gid_clean,
+                    "target": gid_digits,
                     "text": text,
                     "url": url or None,
                     "run_at": when.isoformat(),
@@ -239,19 +331,19 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
                     "created_at": now_iso(),
                 }
             )
-            return v2_ok({"groupId": gid_clean, "id": sched_id, "scheduled_for": when.isoformat()}, 201)
+            return v2_ok({"groupId": gid_jid, "id": sched_id, "scheduled_for": when.isoformat()}, 201)
 
         await enforce_quota(user, 1)
         msg_id = new_id()
         try:
-            result = await wa_client.send_group(session["id"], gid_clean, text, url or None)
+            result = await wa_client.send_group(session["id"], gid_digits, text, url or None)
             await db.messages.insert_one(
                 {
                     "id": msg_id,
                     "user_id": user["id"],
                     "session_id": session["id"],
                     "direction": "outbound",
-                    "to": gid_clean,
+                    "to": gid_digits,
                     "text": text,
                     "type": "group",
                     "has_media": bool(url),
@@ -265,18 +357,19 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             await db.users.update_one(
                 {"id": user["id"]}, {"$inc": {"quota_used": 1}}
             )
-            return v2_ok({"groupId": gid_clean, "id": msg_id}, 201)
+            return v2_ok({"groupId": gid_jid, "id": msg_id}, 201)
         except Exception as e:
+            err_msg = str(e) or "send failed"
             await db.messages.insert_one(
                 {
                     "id": msg_id,
                     "user_id": user["id"],
                     "session_id": session["id"],
                     "direction": "outbound",
-                    "to": gid_clean,
+                    "to": gid_digits,
                     "text": text,
                     "status": "failed",
-                    "error": str(e),
+                    "error": err_msg,
                     "is_group": True,
                     "source": "v2_api",
                     "sent_at": now_iso(),
@@ -286,8 +379,8 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
                 "success": False,
                 "statusCode": 400,
                 "timestamp": now_ts(),
-                "error": str(e),
-                "data": {"groupId": gid_clean, "id": msg_id},
+                "error": err_msg,
+                "data": {"groupId": gid_jid, "id": msg_id},
             }
 
     # ------------ v2 / message / status ------------
@@ -686,6 +779,229 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             "data": {"groupId": gid_clean, "id": msg_id},
         }
 
+    # ------------ v2 / sendMessageFile ------------
+    # Direct file upload to a phone number — exact spec format.
+    @api.post("/v2/sendMessageFile")
+    async def send_message_file_v2(
+        request: Request,
+        response: Response,
+        phonenumber: str = Form(...),
+        file: UploadFile = File(...),
+        caption: str = Form(""),
+        filename: str = Form(""),
+    ):
+        user = await user_from_bearer(request)
+
+        # Validate inputs BEFORE hitting the WA session
+        display_name = filename or file.filename or "file"
+        mime = detect_mime(file.content_type, display_name)
+        if not is_mime_allowed(mime):
+            response.status_code = 400
+            return {
+                "success": False,
+                "statusCode": 400,
+                "timestamp": now_ts(),
+                "error": (
+                    f"Unsupported MIME type '{mime}'. Allowed: PDF, Word, Excel, "
+                    "PowerPoint, image/*, video/mp4."
+                ),
+                "data": {},
+            }
+
+        session = await _resolve_session(user["id"])
+
+        phone = normalize_phone(phonenumber)
+        phone = await _maybe_apply_country_code(session, phone)
+        if not phone:
+            response.status_code = 400
+            return {
+                "success": False,
+                "statusCode": 400,
+                "timestamp": now_ts(),
+                "error": "Invalid phonenumber",
+                "data": {},
+            }
+
+        ext = PathLib(display_name).suffix or ""
+        local = UPLOAD_DIR / f"{new_id()}{ext}"
+        size = 0
+        with local.open("wb") as out:
+            while True:
+                chunk = await file.read(1 << 20)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_FILE_SIZE_BYTES:
+                    out.close()
+                    local.unlink(missing_ok=True)
+                    response.status_code = 413
+                    return {
+                        "success": False,
+                        "statusCode": 413,
+                        "timestamp": now_ts(),
+                        "error": (
+                            f"File too large. Max {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB."
+                        ),
+                        "data": {},
+                    }
+                out.write(chunk)
+
+        await enforce_quota(user, 1)
+        msg = await send_media_one(
+            user["id"],
+            session["id"],
+            phone,
+            caption or "",
+            str(local),
+            display_name,
+            mime,
+            "v2_api_message_file",
+        )
+        if msg["status"] == "sent":
+            await db.users.update_one(
+                {"id": user["id"]}, {"$inc": {"quota_used": 1}}
+            )
+            return {
+                "success": True,
+                "statusCode": 200,
+                "timestamp": now_ts(),
+                "error": "",
+                "data": {
+                    "messageId": msg["id"],
+                    "phonenumber": phone,
+                    "fileType": file_type_label(mime, display_name),
+                },
+            }
+        response.status_code = 400
+        return {
+            "success": False,
+            "statusCode": 400,
+            "timestamp": now_ts(),
+            "error": msg.get("error") or "send failed",
+            "data": {"messageId": msg["id"], "phonenumber": phone},
+        }
+
+    # ------------ v2 / sendGroupFile ------------
+    # Direct file upload to a WhatsApp group — exact spec format.
+    @api.post("/v2/sendGroupFile")
+    async def send_group_file_v2(
+        request: Request,
+        response: Response,
+        groupId: str = Form(...),
+        file: UploadFile = File(...),
+        caption: str = Form(""),
+        filename: str = Form(""),
+    ):
+        user = await user_from_bearer(request)
+
+        # Validate inputs before resolving the session
+        gid_digits, gid_jid = normalize_group_id(groupId)
+        display_name = filename or file.filename or "file"
+        mime = detect_mime(file.content_type, display_name)
+        if not is_mime_allowed(mime):
+            response.status_code = 400
+            return {
+                "success": False,
+                "statusCode": 400,
+                "timestamp": now_ts(),
+                "error": (
+                    f"Unsupported MIME type '{mime}'. Allowed: PDF, Word, Excel, "
+                    "PowerPoint, image/*, video/mp4."
+                ),
+                "data": {},
+            }
+
+        session = await _resolve_session(user["id"])
+
+        ext = PathLib(display_name).suffix or ""
+        local = UPLOAD_DIR / f"{new_id()}{ext}"
+        size = 0
+        with local.open("wb") as out:
+            while True:
+                chunk = await file.read(1 << 20)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_FILE_SIZE_BYTES:
+                    out.close()
+                    local.unlink(missing_ok=True)
+                    response.status_code = 413
+                    return {
+                        "success": False,
+                        "statusCode": 413,
+                        "timestamp": now_ts(),
+                        "error": (
+                            f"File too large. Max {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB."
+                        ),
+                        "data": {},
+                    }
+                out.write(chunk)
+
+        await enforce_quota(user, 1)
+        msg_id = new_id()
+        msg_doc = {
+            "id": msg_id,
+            "user_id": user["id"],
+            "session_id": session["id"],
+            "direction": "outbound",
+            "to": gid_digits,
+            "is_group": True,
+            "text": caption or "",
+            "status": "queued",
+            "type": "document",
+            "has_media": True,
+            "file_name": display_name,
+            "mime_type": mime,
+            "source": "v2_api_group_file",
+            "sent_at": now_iso(),
+            "wa_message_id": None,
+            "error": None,
+        }
+        try:
+            rj = await wa_client.send_media(
+                session["id"],
+                gid_jid,
+                str(local),
+                caption or "",
+                display_name,
+                mime,
+                True,
+            )
+            msg_doc["status"] = "sent"
+            msg_doc["wa_message_id"] = rj.get("message_id")
+        except Exception as e:
+            msg_doc["status"] = "failed"
+            msg_doc["error"] = str(e) or "group file send failed"
+            try:
+                local.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        await db.messages.insert_one(msg_doc)
+        if msg_doc["status"] == "sent":
+            await db.users.update_one(
+                {"id": user["id"]}, {"$inc": {"quota_used": 1}}
+            )
+            return {
+                "success": True,
+                "statusCode": 200,
+                "timestamp": now_ts(),
+                "error": "",
+                "data": {
+                    "messageId": msg_id,
+                    "groupId": gid_jid,
+                    "fileType": file_type_label(mime, display_name),
+                },
+            }
+        response.status_code = 400
+        return {
+            "success": False,
+            "statusCode": 400,
+            "timestamp": now_ts(),
+            "error": msg_doc.get("error") or "send failed",
+            "data": {"messageId": msg_id, "groupId": gid_jid},
+        }
+
     # Drop-in compatible with 360messenger's exact path + payload
     @api.get("/v2/groupChat/getGroupList")
     async def group_chat_get_group_list(request: Request):
@@ -707,6 +1023,8 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
         return {
             "success": True,
             "statusCode": 200,
+            "timestamp": now_ts(),
+            "error": "",
             "data": {"groups": groups},
         }
 

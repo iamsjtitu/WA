@@ -35,8 +35,9 @@ const SECTIONS = [
     title: "WhatsApp API v2.0",
     items: [
       { id: "v2-send", label: "Send Message", method: "POST" },
-      { id: "v2-document", label: "Send Document (PDF/Word/Excel)", method: "POST" },
+      { id: "v2-message-file", label: "Send Message + File", method: "POST" },
       { id: "v2-group", label: "Send Group Message", method: "POST" },
+      { id: "v2-group-file", label: "Send Group + File", method: "POST" },
       { id: "v2-groups-list", label: "Get Group List", method: "GET" },
       { id: "v2-status", label: "Get Message Status", method: "GET" },
       { id: "v2-sent", label: "List Sent Messages", method: "GET" },
@@ -316,45 +317,31 @@ echo curl_exec($ch);`,
       },
     },
     {
-      id: "v2-document",
+      id: "v2-message-file",
       method: "POST",
-      path: "/v2/sendDocument",
-      title: "Send Document (PDF / Word / Excel)",
+      path: "/v2/sendMessageFile",
+      title: "Send Message with File (Direct upload)",
       description:
-        "Attach a PDF, Word, Excel, PowerPoint, ZIP, CSV or any other file as a WhatsApp document. Provide either a multipart file upload OR a public URL. Address either a phonenumber (1-on-1) or a groupId.",
+        "Attach a PDF, Word, Excel, PowerPoint, image (jpg/png) or video (mp4) and send it to a single phone number — directly via multipart/form-data, no URL hosting needed. Max 100 MB.",
       auth: "Bearer Token (your API key)",
       params: [
-        { name: "phonenumber", type: "string", required: false, desc: "Recipient phone (international, no +). Required if groupId not set." },
-        { name: "groupId", type: "string", required: false, desc: "Group id (without @g.us). Required if phonenumber not set." },
-        { name: "file", type: "binary", required: false, desc: "Multipart file upload (recommended for PDFs/Word). Required if url not set." },
-        { name: "url", type: "string", required: false, desc: "Public URL of the document. Required if file not set." },
-        { name: "file_name", type: "string", required: false, desc: "Display name shown to the recipient (defaults to upload's filename)." },
-        { name: "caption", type: "string", required: false, desc: "Optional caption shown beside the document." },
+        { name: "phonenumber", type: "string", required: true, desc: "Recipient phone in international format (e.g. 919876543210)." },
+        { name: "file", type: "binary", required: true, desc: "PDF, .docx, .xlsx, .pptx, .jpg, .png, .mp4 — max 100 MB." },
+        { name: "caption", type: "string", required: false, desc: "Text caption shown alongside the document." },
+        { name: "filename", type: "string", required: false, desc: "Override the display name shown to the recipient (defaults to the upload's filename)." },
       ],
       samples: {
-        cURL: `# Direct file upload (recommended for PDFs / Word)
-curl --location '${API_BASE}/v2/sendDocument' \\
+        cURL: `curl --location '${API_BASE}/v2/sendMessageFile' \\
   --header 'Authorization: Bearer YOUR_API_KEY' \\
-  --form 'phonenumber="447488888888"' \\
+  --form 'phonenumber="919876543210"' \\
   --form 'caption="Q3 invoice attached"' \\
-  --form 'file=@/path/to/invoice.pdf'
-
-# Or, send from a public URL:
-curl --location '${API_BASE}/v2/sendDocument' \\
-  --header 'Authorization: Bearer YOUR_API_KEY' \\
-  --form 'phonenumber="447488888888"' \\
-  --form 'file_name="report.docx"' \\
-  --form 'url="https://example.com/files/report.docx"'`,
+  --form 'file=@/path/to/invoice.pdf'`,
         Python: `import requests
-
 with open("invoice.pdf", "rb") as fh:
     r = requests.post(
-        "${API_BASE}/v2/sendDocument",
+        "${API_BASE}/v2/sendMessageFile",
         headers={"Authorization": "Bearer YOUR_API_KEY"},
-        data={
-            "phonenumber": "447488888888",
-            "caption": "Q3 invoice attached",
-        },
+        data={"phonenumber": "919876543210", "caption": "Q3 invoice"},
         files={"file": ("invoice.pdf", fh, "application/pdf")},
     )
 print(r.json())`,
@@ -363,40 +350,28 @@ import FormData from "form-data";
 import fetch from "node-fetch";
 
 const form = new FormData();
-form.append("phonenumber", "447488888888");
-form.append("caption", "Q3 invoice attached");
+form.append("phonenumber", "919876543210");
+form.append("caption", "Q3 invoice");
 form.append("file", fs.createReadStream("./invoice.pdf"));
 
-const res = await fetch("${API_BASE}/v2/sendDocument", {
+const res = await fetch("${API_BASE}/v2/sendMessageFile", {
   method: "POST",
   headers: { Authorization: "Bearer YOUR_API_KEY" },
   body: form,
 });
 console.log(await res.json());`,
-        PHP: `$ch = curl_init('${API_BASE}/v2/sendDocument');
-curl_setopt_array($ch, [
-  CURLOPT_RETURNTRANSFER => true,
-  CURLOPT_POST => true,
-  CURLOPT_HTTPHEADER => ['Authorization: Bearer YOUR_API_KEY'],
-  CURLOPT_POSTFIELDS => [
-    'phonenumber' => '447488888888',
-    'caption' => 'Q3 invoice attached',
-    'file' => new CURLFile('/path/to/invoice.pdf', 'application/pdf', 'invoice.pdf'),
-  ],
-]);
-echo curl_exec($ch);`,
       },
       response: {
-        status: 201,
+        status: 200,
         body: `{
   "success": true,
-  "statusCode": 201,
-  "timestamp": "2026-04-28 17:02:10",
+  "statusCode": 200,
+  "timestamp": "2026-04-28 17:30:00",
+  "error": "",
   "data": {
-    "phonenumber": "447488888888",
-    "id": "bcf2b4f0-73f7-4235-b691-e9b08a5aa0b9",
-    "file_name": "invoice.pdf",
-    "mime_type": "application/pdf"
+    "messageId": "bcf2b4f0-73f7-4235-b691-e9b08a5aa0b9",
+    "phonenumber": "919876543210",
+    "fileType": "pdf"
   }
 }`,
       },
@@ -446,6 +421,51 @@ console.log(await r.json());`,
   "data": {
     "groupId": "1203********",
     "id": "d8fdf876-d54b-4522-bcf5-fabc8802fcbd"
+  }
+}`,
+      },
+    },
+    {
+      id: "v2-group-file",
+      method: "POST",
+      path: "/v2/sendGroupFile",
+      title: "Send Group with File (Direct upload)",
+      description:
+        "Attach a document/image/video and send it to a WhatsApp group — directly via multipart/form-data. groupId can be passed with or without the @g.us suffix (full JID is preserved in the response).",
+      auth: "Bearer Token (your API key)",
+      params: [
+        { name: "groupId", type: "string", required: true, desc: "Group id in the form '120363xxxxxxxxxxxx@g.us' (or just digits — '@g.us' is auto-appended)." },
+        { name: "file", type: "binary", required: true, desc: "PDF, .docx, .xlsx, .pptx, .jpg, .png, .mp4 — max 100 MB." },
+        { name: "caption", type: "string", required: false, desc: "Optional caption alongside the file." },
+        { name: "filename", type: "string", required: false, desc: "Override the display name." },
+      ],
+      samples: {
+        cURL: `curl --location '${API_BASE}/v2/sendGroupFile' \\
+  --header 'Authorization: Bearer YOUR_API_KEY' \\
+  --form 'groupId="120363424861931093@g.us"' \\
+  --form 'caption="Marketing assets — Q3"' \\
+  --form 'file=@/path/to/deck.pdf'`,
+        Python: `import requests
+with open("deck.pdf", "rb") as fh:
+    r = requests.post(
+        "${API_BASE}/v2/sendGroupFile",
+        headers={"Authorization": "Bearer YOUR_API_KEY"},
+        data={"groupId": "120363424861931093@g.us", "caption": "Marketing assets"},
+        files={"file": ("deck.pdf", fh, "application/pdf")},
+    )
+print(r.json())`,
+      },
+      response: {
+        status: 200,
+        body: `{
+  "success": true,
+  "statusCode": 200,
+  "timestamp": "2026-04-28 17:30:00",
+  "error": "",
+  "data": {
+    "messageId": "uuid-here",
+    "groupId": "120363424861931093@g.us",
+    "fileType": "pdf"
   }
 }`,
       },
