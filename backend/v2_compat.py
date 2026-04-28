@@ -17,7 +17,7 @@ from pathlib import Path as PathLib
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Form, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFile, File
 
 logger = logging.getLogger("wapihub.v2")
 UPLOAD_DIR = PathLib("/app/wa-service/uploads")
@@ -119,9 +119,10 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
         return phone
 
     # ------------ v2 / sendMessage ------------
-    @api.post("/v2/sendMessage")
+    @api.post("/v2/sendMessage", status_code=201)
     async def send_message_v2(
         request: Request,
+        response: Response,
         phonenumber: str = Form(...),
         text: str = Form(""),
         url: str = Form(""),
@@ -139,8 +140,12 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             )
 
         # Schedule path
-        when = parse_delay(delay) if delay else None
-        if when and when > datetime.now(timezone.utc):
+        if delay:
+            when = parse_delay(delay)
+            if when is None:
+                raise HTTPException(status_code=400, detail="Invalid delay format. Use 'MM-DD-YYYY HH:MM' (GMT)")
+            if when <= datetime.now(timezone.utc):
+                raise HTTPException(status_code=400, detail="delay must be in the future")
             sched_id = new_id()
             await db.scheduled_messages.insert_one(
                 {
