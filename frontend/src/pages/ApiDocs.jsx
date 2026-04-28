@@ -1,0 +1,159 @@
+import { useState } from "react";
+import { useAuth } from "../contexts/AuthContext";
+import api from "../lib/api";
+import { PageHeader } from "./Overview";
+import { Copy, ArrowsClockwise } from "@phosphor-icons/react";
+import { toast } from "sonner";
+
+export default function ApiDocs() {
+  const { user, refresh } = useAuth();
+  const apiBase = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+  const copy = (txt) => {
+    navigator.clipboard.writeText(txt);
+    toast.success("Copied");
+  };
+
+  const regen = async () => {
+    if (!confirm("Rotate your API key? Existing integrations will stop working.")) return;
+    await api.post("/me/regenerate-key");
+    await refresh();
+    toast.success("API key rotated");
+  };
+
+  const code = (lang, body) => (
+    <div className="codeblk relative group">
+      <button
+        onClick={() => copy(body)}
+        className="absolute top-2 right-2 p-1.5 bg-white/10 hover:bg-white/20 sharp text-white opacity-0 group-hover:opacity-100 transition"
+        data-testid={`copy-code-${lang}`}
+      >
+        <Copy size={14} />
+      </button>
+      <pre className="whitespace-pre-wrap">{body}</pre>
+    </div>
+  );
+
+  return (
+    <div className="p-10 fade-in">
+      <PageHeader title="API Documentation" sub="Send WhatsApp messages programmatically using your X-API-Key." />
+
+      <section className="mt-8 border border-neutral-200 sharp p-6">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-widest text-neutral-500">
+              your api key
+            </p>
+            <code className="font-mono text-sm bg-neutral-100 border border-neutral-200 sharp px-3 py-2 mt-2 inline-block break-all" data-testid="api-key-display">
+              {user?.api_key}
+            </code>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => copy(user?.api_key)} className="btn-ghost text-sm inline-flex items-center gap-2" data-testid="copy-api-key">
+              <Copy size={14} /> Copy
+            </button>
+            <button onClick={regen} className="btn-ghost text-sm inline-flex items-center gap-2" data-testid="rotate-api-key">
+              <ArrowsClockwise size={14} /> Rotate
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="font-display text-2xl tracking-tight">Base URL</h2>
+        <div className="mt-3">{code("base", apiBase)}</div>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="font-display text-2xl tracking-tight">Authentication</h2>
+        <p className="text-sm text-neutral-600 mt-2">Send your API key in the <span className="kbd">X-API-Key</span> header.</p>
+        <div className="mt-3">{code("auth", `X-API-Key: ${user?.api_key || "wapi_•••"}`)}</div>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="font-display text-2xl tracking-tight">Send a message</h2>
+        <p className="font-mono text-xs uppercase tracking-widest text-[#002FA7] mt-2">
+          POST /api/v1/messages
+        </p>
+
+        <h3 className="font-display font-semibold mt-6">cURL</h3>
+        {code(
+          "curl",
+          `curl -X POST ${apiBase}/v1/messages \\
+  -H "X-API-Key: ${user?.api_key || "wapi_•••"}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "to": "919876543210",
+    "text": "Hello from WapiHub!"
+  }'`
+        )}
+
+        <h3 className="font-display font-semibold mt-6">Node.js</h3>
+        {code(
+          "node",
+          `const res = await fetch("${apiBase}/v1/messages", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "X-API-Key": "${user?.api_key || "wapi_•••"}"
+  },
+  body: JSON.stringify({ to: "919876543210", text: "Hi!" })
+});
+console.log(await res.json());`
+        )}
+
+        <h3 className="font-display font-semibold mt-6">Python</h3>
+        {code(
+          "python",
+          `import requests
+r = requests.post(
+    "${apiBase}/v1/messages",
+    headers={"X-API-Key": "${user?.api_key || "wapi_•••"}"},
+    json={"to": "919876543210", "text": "Hi!"},
+)
+print(r.json())`
+        )}
+
+        <h3 className="font-display font-semibold mt-6">PHP</h3>
+        {code(
+          "php",
+          `<?php
+$ch = curl_init("${apiBase}/v1/messages");
+curl_setopt_array($ch, [
+  CURLOPT_RETURNTRANSFER => true,
+  CURLOPT_POST => true,
+  CURLOPT_HTTPHEADER => [
+    "Content-Type: application/json",
+    "X-API-Key: ${user?.api_key || "wapi_•••"}"
+  ],
+  CURLOPT_POSTFIELDS => json_encode([
+    "to" => "919876543210",
+    "text" => "Hi!"
+  ])
+]);
+echo curl_exec($ch);`
+        )}
+      </section>
+
+      <section className="mt-10">
+        <h2 className="font-display text-2xl tracking-tight">List sessions</h2>
+        <p className="font-mono text-xs uppercase tracking-widest text-[#002FA7] mt-2">
+          GET /api/v1/sessions
+        </p>
+        {code(
+          "list-sessions",
+          `curl -H "X-API-Key: ${user?.api_key || "wapi_•••"}" ${apiBase}/v1/sessions`
+        )}
+      </section>
+
+      <section className="mt-10 border border-neutral-200 sharp p-6 bg-yellow-50">
+        <h3 className="font-display font-semibold text-lg tracking-tight">Things to know</h3>
+        <ul className="mt-3 text-sm text-neutral-700 space-y-1 list-disc pl-5">
+          <li>Numbers must include the country code (no <span className="kbd">+</span> sign).</li>
+          <li>If you skip <span className="kbd">session_id</span>, the first connected session is used.</li>
+          <li>Quota is enforced per month. Failed sends don't count.</li>
+        </ul>
+      </section>
+    </div>
+  );
+}

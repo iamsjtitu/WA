@@ -2,114 +2,311 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------- Fonts ---------- */
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+/* ---------- Design Tokens ---------- */
+:root {
+    --bg: 0 0% 100%;
+    --bg-soft: 220 14% 97%;
+    --bg-dark: 0 0% 4%;
+
+    --fg: 0 0% 4%;
+    --fg-muted: 220 9% 46%;
+    --fg-faint: 220 9% 64%;
+
+    --border: 220 13% 91%;
+    --border-strong: 220 9% 80%;
+
+    --brand: 224 100% 33%;
+    --brand-hover: 224 100% 27%;
+    --accent: 65 100% 50%;
+
+    --success: 158 64% 40%;
+    --error: 0 84% 60%;
+    --warning: 38 92% 50%;
+
+    /* shadcn aliases */
+    --background: var(--bg);
+    --foreground: var(--fg);
+    --card: var(--bg);
+    --card-foreground: var(--fg);
+    --popover: var(--bg);
+    --popover-foreground: var(--fg);
+    --primary: var(--fg);
+    --primary-foreground: 0 0% 100%;
+    --secondary: var(--bg-soft);
+    --secondary-foreground: var(--fg);
+    --muted: var(--bg-soft);
+    --muted-foreground: var(--fg-muted);
+    --accent-foreground: var(--fg);
+    --destructive: var(--error);
+    --destructive-foreground: 0 0% 100%;
+    --input: var(--border);
+    --ring: var(--brand);
+    --radius: 4px;
+
+    --chart-1: 224 100% 33%;
+    --chart-2: 158 64% 40%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 0 84% 60%;
+    --chart-5: 220 9% 46%;
+}
+
+* {
+    border-color: hsl(var(--border));
+}
+
+html,
+body,
+#root {
+    height: 100%;
+}
+
 body {
     margin: 0;
-    font-family:
-        -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-        sans-serif;
+    background: hsl(var(--bg));
+    color: hsl(var(--fg));
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    font-feature-settings:
+        "ss01" on,
+        "cv11" on;
 }
 
-code {
-    font-family:
-        source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.font-display {
+    font-family: "Outfit", system-ui, sans-serif;
+    letter-spacing: -0.02em;
+    font-weight: 600;
 }
 
-@layer base {
-    :root {
-        --background: 0 0% 100%;
-        --foreground: 0 0% 3.9%;
-        --card: 0 0% 100%;
-        --card-foreground: 0 0% 3.9%;
-        --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 3.9%;
-        --primary: 0 0% 9%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 0 0% 96.1%;
-        --secondary-foreground: 0 0% 9%;
-        --muted: 0 0% 96.1%;
-        --muted-foreground: 0 0% 45.1%;
-        --accent: 0 0% 96.1%;
-        --accent-foreground: 0 0% 9%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 89.8%;
-        --input: 0 0% 89.8%;
-        --ring: 0 0% 3.9%;
-        --chart-1: 12 76% 61%;
-        --chart-2: 173 58% 39%;
-        --chart-3: 197 37% 24%;
-        --chart-4: 43 74% 66%;
-        --chart-5: 27 87% 67%;
-        --radius: 0.5rem;
+.font-mono,
+code,
+kbd,
+pre,
+samp {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+::selection {
+    background: hsl(var(--brand));
+    color: white;
+}
+
+/* ---------- Utility classes ---------- */
+.grid-bg {
+    background-image:
+        linear-gradient(to right, hsl(var(--border)) 1px, transparent 1px),
+        linear-gradient(to bottom, hsl(var(--border)) 1px, transparent 1px);
+    background-size: 56px 56px;
+}
+
+.grid-bg-dark {
+    background-image:
+        linear-gradient(to right, rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+    background-size: 48px 48px;
+}
+
+.noise::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.5'/></svg>");
+    opacity: 0.04;
+    mix-blend-mode: multiply;
+}
+
+/* Sharp corners override (dashboard cards) */
+.sharp {
+    border-radius: 4px !important;
+}
+
+.btn-brand {
+    background: hsl(var(--brand));
+    color: #fff;
+    border-radius: 4px;
+    padding: 0.625rem 1.1rem;
+    font-weight: 500;
+    transition:
+        background-color 0.18s ease,
+        transform 0.18s ease;
+}
+.btn-brand:hover {
+    background: hsl(var(--brand-hover));
+}
+.btn-brand:active {
+    transform: translateY(1px);
+}
+
+.btn-accent {
+    background: hsl(var(--accent));
+    color: #0a0a0a;
+    border-radius: 4px;
+    padding: 0.625rem 1.1rem;
+    font-weight: 600;
+    transition: background-color 0.18s ease;
+}
+.btn-accent:hover {
+    background: #d4e600;
+}
+
+.btn-ghost {
+    background: transparent;
+    color: hsl(var(--fg));
+    border: 1px solid hsl(var(--border));
+    border-radius: 4px;
+    padding: 0.55rem 1rem;
+    transition:
+        border-color 0.18s ease,
+        background 0.18s ease;
+}
+.btn-ghost:hover {
+    border-color: hsl(var(--fg));
+    background: hsl(var(--bg-soft));
+}
+
+.kbd {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.7rem;
+    padding: 0.05rem 0.35rem;
+    border: 1px solid hsl(var(--border));
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    background: hsl(var(--bg-soft));
+}
+
+.fade-in {
+    animation: fadeIn 0.35s ease both;
+}
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
     }
-    .dark {
-        --background: 0 0% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 0 0% 9%;
-        --secondary: 0 0% 14.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 14.9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 0 0% 14.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 14.9%;
-        --input: 0 0% 14.9%;
-        --ring: 0 0% 83.1%;
-        --chart-1: 220 70% 50%;
-        --chart-2: 160 60% 45%;
-        --chart-3: 30 80% 55%;
-        --chart-4: 280 65% 60%;
-        --chart-5: 340 75% 55%;
+    to {
+        opacity: 1;
+        transform: none;
     }
 }
 
-@layer base {
-    * {
-        @apply border-border;
+/* status pill colors */
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.72rem;
+    font-family: "JetBrains Mono", monospace;
+    border-radius: 999px;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--bg-soft));
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: hsl(var(--fg-muted));
+}
+.dot.connected {
+    background: #10b981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+.dot.qr {
+    background: #f59e0b;
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+}
+.dot.disconnected,
+.dot.logged_out,
+.dot.failed {
+    background: #ef4444;
+}
+.dot.connecting,
+.dot.starting {
+    background: #3b82f6;
+    animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 1;
     }
-    body {
-        @apply bg-background text-foreground;
+    50% {
+        opacity: 0.4;
     }
 }
 
-@layer base {
-    [data-debug-wrapper="true"] {
-        display: contents !important;
-    }
+/* table */
+.tbl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+.tbl th {
+    text-align: left;
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 500;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    color: hsl(var(--fg-muted));
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--bg-soft));
+}
+.tbl td {
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid hsl(var(--border));
+    vertical-align: middle;
+}
+.tbl tr:last-child td {
+    border-bottom: 0;
+}
 
-    [data-debug-wrapper="true"] > * {
-        margin-left: inherit;
-        margin-right: inherit;
-        margin-top: inherit;
-        margin-bottom: inherit;
-        padding-left: inherit;
-        padding-right: inherit;
-        padding-top: inherit;
-        padding-bottom: inherit;
-        column-gap: inherit;
-        row-gap: inherit;
-        gap: inherit;
-        border-left-width: inherit;
-        border-right-width: inherit;
-        border-top-width: inherit;
-        border-bottom-width: inherit;
-        border-left-style: inherit;
-        border-right-style: inherit;
-        border-top-style: inherit;
-        border-bottom-style: inherit;
-        border-left-color: inherit;
-        border-right-color: inherit;
-        border-top-color: inherit;
-        border-bottom-color: inherit;
-    }
+/* dashboard sidebar item */
+.side-item {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.55rem 0.85rem;
+    color: hsl(var(--fg-muted));
+    border-radius: 4px;
+    transition: all 0.15s ease;
+    font-size: 0.92rem;
+}
+.side-item:hover {
+    color: hsl(var(--fg));
+    background: hsl(var(--bg-soft));
+}
+.side-item.active {
+    color: hsl(var(--fg));
+    background: hsl(var(--bg-soft));
+    box-shadow: inset 2px 0 0 hsl(var(--brand));
+}
+
+/* code block */
+.codeblk {
+    background: #0a0a0a;
+    color: #e6e6e6;
+    padding: 1rem 1.1rem;
+    border-radius: 4px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.8rem;
+    line-height: 1.55;
+    overflow-x: auto;
+    border: 1px solid #27272a;
+}
+
+[data-debug-wrapper="true"] {
+    display: contents !important;
 }
