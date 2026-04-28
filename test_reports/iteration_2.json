@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 2 backend testing complete: webhook CRUD, internal/inbound endpoint with shared-secret auth, /messages/send-media multipart, public API media_url validation, /api/messages direction filter, HMAC algorithm format. All 46/46 pytest tests passed (29 carryover from iteration_1 + 17 new for iteration_2). Backend service healthy; watchdog & supervisor reload cleanly without crash.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/me/webhook (DELETE)", "issue": "$unset removes fields from doc but UserOut still returns null (acceptable). Confirmed via /auth/me — fields come back as None. Non-issue but worth noting that webhook_url/secret keys are removed from the document rather than set to null."},
+      {"endpoint": "/api/me/webhook/test", "issue": "Always returns {sent:true} even when delivery fails (by design — async fire-and-forget). Backend logs WARNING on delivery failure which is correct, but a caller cannot tell from this endpoint whether the webhook actually reached the target. Consider returning latency/status_code from a synchronous test fire."},
+      {"endpoint": "/api/internal/inbound", "issue": "Returns 200 with {ok:false, reason:'session not found'} — returning 404 would be more conventional for unknown session_id. Current behavior matches spec."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 944 lines — approaching the 700-line guideline ceiling. Recommend splitting into routers/modules (auth.py, admin.py, sessions.py, messages.py, webhooks.py, public_api.py, internal.py) before adding more endpoints.",
+    "/api/messages/send-media reads the entire upload into memory before checking size — for a 25MB cap this is fine, but the order should be reversed (use UploadFile.size or stream-and-bail) to avoid OOM under attacker-controlled large uploads. Currently any file is fully buffered before the 25MB check rejects it.",
+    "Public API /api/v1/messages downloads media_url with httpx without enforcing a max-size limit on the response body. A malicious media_url could stream a multi-GB payload. Recommend adding a Content-Length pre-check and a streaming size guard during download.",
+    "fire_webhook silently swallows all exceptions — consider counting failures per-user (e.g., to disable webhook after N consecutive failures, classic 'pause' pattern).",
+    "InboundIn model: 'has_media' is bool but the Node service may send richer media metadata (mimetype, url, file name). Consider extending the model so inbound media events can be persisted with file metadata, mirroring outbound /send-media.",
+    "wa_supervisor watchdog: no test exercised it directly (would require killing the Node process), but startup/reload logs show no crash and Node service comes up healthy on every reload — looks correct.",
+    "Direction filter on /api/messages silently ignores invalid values (anything other than 'inbound'/'outbound') instead of returning 400. Minor UX nit."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (46/46)", "frontend": "n/a (not in scope)"},
+  "test_credentials": "admin@wapihub.com / admin123 (from /app/memory/test_credentials.md & /app/backend/.env). INTERNAL_SECRET read from /app/backend/.env at runtime by tests.",
+  "seed_data_creation": "Tests register fresh TEST_customer_* accounts each run (cleaned up via session teardown), create transient WA sessions then delete them. No persistent pollution.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All iteration_2 features verified at API level. Real WhatsApp QR scan still out-of-scope (no device pairing tested). HMAC signature was verified at the algorithm level only — to verify end-to-end signing, future agents could spin up a tiny aiohttp/Flask listener as a webhook target inside pytest, set webhook_url to it, trigger /me/webhook/test, and recompute hmac_sha256 over the captured body to compare against X-Wapihub-Signature header. Watchdog respawn behavior was not directly tested (would need to SIGKILL the Node process and observe restart) — could be added with a fixture that calls `pkill -f wa-service/server.js` and waits for /api/health to flip back to wa_service:'ok'.",
+  "rca of the issue": "n/a — no failures."
+}

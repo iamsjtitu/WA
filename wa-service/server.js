@@ -18,7 +18,9 @@ const {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const AUTH_ROOT = path.join(__dirname, "auth");
+const AUTH_ROOT = process.env.WA_AUTH_DIR || path.join(__dirname, "auth");
+const FASTAPI_URL = process.env.FASTAPI_URL || "http://127.0.0.1:8001";
+const INTERNAL_SECRET = process.env.INTERNAL_SECRET || "";
 
 if (!fs.existsSync(AUTH_ROOT)) fs.mkdirSync(AUTH_ROOT, { recursive: true });
 
@@ -51,6 +53,67 @@ async function startSession(sessionId) {
   sessions.set(sessionId, meta);
 
   sock.ev.on("creds.update", saveCreds);
+
+  // Inbound message listener — forward to FastAPI
+  sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    if (type !== "notify") return;
+    for (const m of messages) {
+      try {
+        if (!m.key || m.key.fromMe) continue;
+        const remote = m.key.remoteJid || "";
+        if (
+          remote.endsWith("@broadcast") ||
+          remote.endsWith("@g.us") ||
+          remote === "status@broadcast"
+        )
+          continue;
+        const c = m.message;
+        if (!c) continue;
+        let text = "";
+        let msgType = "text";
+        let hasMedia = false;
+        if (c.conversation) text = c.conversation;
+        else if (c.extendedTextMessage?.text) text = c.extendedTextMessage.text;
+        else if (c.imageMessage) {
+          text = c.imageMessage.caption || "";
+          msgType = "image";
+          hasMedia = true;
+        } else if (c.videoMessage) {
+          text = c.videoMessage.caption || "";
+          msgType = "video";
+          hasMedia = true;
+        } else if (c.documentMessage) {
+          text = c.documentMessage.caption || c.documentMessage.fileName || "";
+          msgType = "document";
+          hasMedia = true;
+        } else if (c.audioMessage) {
+          msgType = "audio";
+          hasMedia = true;
+        } else continue;
+
+        const fromPhone = remote.split("@")[0];
+        const payload = {
+          session_id: sessionId,
+          from: fromPhone,
+          text,
+          type: msgType,
+          message_id: m.key.id,
+          timestamp: Number(m.messageTimestamp || 0) * 1000,
+          has_media: hasMedia,
+        };
+        fetch(`${FASTAPI_URL}/api/internal/inbound`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Internal-Secret": INTERNAL_SECRET,
+          },
+          body: JSON.stringify(payload),
+        }).catch((e) => console.error("[wa] inbound forward failed:", e.message));
+      } catch (e) {
+        console.error("[wa] inbound parse error:", e.message);
+      }
+    }
+  });
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
@@ -184,6 +247,55 @@ app.post("/sessions/:id/send", async (req, res) => {
   try {
     const jid = jidFromPhone(to);
     const result = await m.sock.sendMessage(jid, { text: String(text) });
+    res.json({
+      ok: true,
+      message_id: result?.key?.id || null,
+      to,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/sessions/:id/send-media", async (req, res) => {
+  const id = req.params.id;
+  const { to, file_path, caption, file_name, mime_type, delete_after } = req.body || {};
+  if (!to || !file_path)
+    return res.status(400).json({ error: "to and file_path required" });
+
+  const m = ensureSession(id);
+  if (!m || m.status !== "connected") {
+    return res
+      .status(400)
+      .json({ error: `session not connected (status=${m?.status || "not_started"})` });
+  }
+  if (!fs.existsSync(file_path)) {
+    return res.status(400).json({ error: "file not found at path" });
+  }
+  try {
+    const jid = jidFromPhone(to);
+    const mt = String(mime_type || "").toLowerCase();
+    let payload;
+    if (mt.startsWith("image/")) {
+      payload = { image: { url: file_path }, caption: caption || undefined };
+    } else if (mt.startsWith("video/")) {
+      payload = { video: { url: file_path }, caption: caption || undefined };
+    } else if (mt.startsWith("audio/")) {
+      payload = { audio: { url: file_path }, mimetype: mt, ptt: false };
+    } else {
+      payload = {
+        document: { url: file_path },
+        mimetype: mt || "application/octet-stream",
+        fileName: file_name || path.basename(file_path),
+        caption: caption || undefined,
+      };
+    }
+    const result = await m.sock.sendMessage(jid, payload);
+    if (delete_after) {
+      try {
+        fs.unlinkSync(file_path);
+      } catch {}
+    }
     res.json({
       ok: true,
       message_id: result?.key?.id || null,

@@ -8,17 +8,33 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 import asyncio
+import hashlib
+import hmac
+import json
 import logging
 import os
 import re
 import secrets
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path as PathLib
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
+import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
 
 import auth as auth_mod
@@ -72,6 +88,8 @@ class UserOut(BaseModel):
     quota_monthly: int
     quota_used: int
     created_at: str
+    webhook_url: Optional[str] = None
+    webhook_secret: Optional[str] = None
 
 
 class CustomerCreateIn(BaseModel):
@@ -106,7 +124,26 @@ class BulkSendIn(BaseModel):
 class ApiSendIn(BaseModel):
     session_id: Optional[str] = None
     to: str
-    text: str = Field(min_length=1, max_length=4096)
+    text: Optional[str] = Field(default=None, max_length=4096)
+    media_url: Optional[str] = None
+    caption: Optional[str] = Field(default=None, max_length=4096)
+    file_name: Optional[str] = None
+
+
+class WebhookSetIn(BaseModel):
+    url: str = Field(min_length=8, max_length=500)
+
+
+class InboundIn(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str
+    from_: str = Field(alias="from")
+    text: str = ""
+    type: str = "text"
+    message_id: Optional[str] = None
+    timestamp: Optional[int] = None
+    has_media: bool = False
 
 
 # ---------------- Helpers ----------------
@@ -131,11 +168,43 @@ def user_to_out(u: dict) -> UserOut:
         quota_monthly=u.get("quota_monthly", 1000),
         quota_used=u.get("quota_used", 0),
         created_at=u.get("created_at", ""),
+        webhook_url=u.get("webhook_url"),
+        webhook_secret=u.get("webhook_secret"),
     )
 
 
 def normalize_phone(phone: str) -> str:
     return re.sub(r"[^0-9]", "", phone or "")
+
+
+# ---------------- Webhook helpers ----------------
+UPLOAD_DIR = PathLib("/app/wa-service/uploads")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def hmac_sign(secret: str, body: bytes) -> str:
+    return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+
+async def fire_webhook(user_id: str, payload: dict):
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user or not user.get("webhook_url"):
+        return
+    url = user["webhook_url"]
+    secret = user.get("webhook_secret") or user.get("api_key", "")
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    sig = hmac_sign(secret, body)
+    headers = {
+        "Content-Type": "application/json",
+        "X-Wapihub-Signature": sig,
+        "X-Wapihub-Event": payload.get("event", "message.received"),
+        "User-Agent": "WapiHub-Webhook/1.0",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            await c.post(url, content=body, headers=headers)
+    except Exception as e:
+        logger.warning("webhook delivery failed user=%s url=%s: %s", user_id, url, e)
 
 
 # ---------------- Auth Endpoints ----------------
@@ -434,8 +503,11 @@ async def _send_one(user_id: str, session_id: str, to: str, text: str, source: s
         "id": new_id(),
         "user_id": user_id,
         "session_id": session_id,
+        "direction": "outbound",
         "to": phone,
         "text": text,
+        "type": "text",
+        "has_media": False,
         "status": "queued",
         "error": None,
         "source": source,
@@ -449,6 +521,59 @@ async def _send_one(user_id: str, session_id: str, to: str, text: str, source: s
     except Exception as e:
         msg_doc["status"] = "failed"
         msg_doc["error"] = str(e)
+    await db.messages.insert_one(msg_doc)
+    msg_doc.pop("_id", None)
+    return msg_doc
+
+
+async def _send_media_one(
+    user_id: str,
+    session_id: str,
+    to: str,
+    caption: str,
+    file_path: str,
+    file_name: str,
+    mime_type: str,
+    source: str,
+):
+    phone = normalize_phone(to)
+    if not phone:
+        try:
+            PathLib(file_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        return {"to": to, "status": "failed", "error": "invalid phone"}
+    primary = mime_type.split("/")[0] if "/" in mime_type else "document"
+    msg_doc = {
+        "id": new_id(),
+        "user_id": user_id,
+        "session_id": session_id,
+        "direction": "outbound",
+        "to": phone,
+        "text": caption or "",
+        "status": "queued",
+        "type": primary if primary in ("image", "video", "audio") else "document",
+        "has_media": True,
+        "file_name": file_name,
+        "mime_type": mime_type,
+        "source": source,
+        "sent_at": now_iso(),
+        "wa_message_id": None,
+        "error": None,
+    }
+    try:
+        result = await wa_client.send_media(
+            session_id, phone, file_path, caption or "", file_name, mime_type, True
+        )
+        msg_doc["status"] = "sent"
+        msg_doc["wa_message_id"] = result.get("message_id")
+    except Exception as e:
+        msg_doc["status"] = "failed"
+        msg_doc["error"] = str(e)
+        try:
+            PathLib(file_path).unlink(missing_ok=True)
+        except Exception:
+            pass
     await db.messages.insert_one(msg_doc)
     msg_doc.pop("_id", None)
     return msg_doc
@@ -501,15 +626,143 @@ async def send_bulk_dashboard(payload: BulkSendIn, user: dict = Depends(current_
     return {"total": len(recipients), "sent": sent_count, "failed": len(recipients) - sent_count, "results": results}
 
 
+@api.post("/messages/send-media")
+async def send_media_dashboard(
+    session_id: str = Form(...),
+    to: str = Form(...),
+    caption: str = Form(""),
+    media: UploadFile = File(...),
+    user: dict = Depends(current_user),
+):
+    s = await db.wa_sessions.find_one({"id": session_id, "user_id": user["id"]})
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    await _enforce_quota(user, 1)
+
+    ext = PathLib(media.filename or "file").suffix or ""
+    file_path = UPLOAD_DIR / f"{new_id()}{ext}"
+    contents = await media.read()
+    if len(contents) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 25MB)")
+    file_path.write_bytes(contents)
+    mime = media.content_type or "application/octet-stream"
+
+    msg = await _send_media_one(
+        user["id"],
+        session_id,
+        to,
+        caption,
+        str(file_path),
+        media.filename or "file",
+        mime,
+        "dashboard_media",
+    )
+    if msg["status"] == "sent":
+        await db.users.update_one({"id": user["id"]}, {"$inc": {"quota_used": 1}})
+    return msg
+
+
+# ---------------- Webhook (per-user) ----------------
+@api.patch("/me/webhook")
+async def set_webhook(payload: WebhookSetIn, user: dict = Depends(current_user)):
+    if not payload.url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="Webhook URL must start with http:// or https://")
+    secret = secrets.token_urlsafe(24)
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"webhook_url": payload.url, "webhook_secret": secret}},
+    )
+    return {"webhook_url": payload.url, "webhook_secret": secret}
+
+
+@api.delete("/me/webhook")
+async def clear_webhook(user: dict = Depends(current_user)):
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$unset": {"webhook_url": "", "webhook_secret": ""}},
+    )
+    return {"ok": True}
+
+
+@api.post("/me/webhook/test")
+async def test_webhook(user: dict = Depends(current_user)):
+    refreshed = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    if not refreshed.get("webhook_url"):
+        raise HTTPException(status_code=400, detail="Set a webhook URL first")
+    payload = {
+        "event": "test",
+        "session_id": "test-session",
+        "from": "0000000000",
+        "text": "WapiHub webhook test event",
+        "type": "text",
+        "message_id": "test_" + new_id(),
+        "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+        "has_media": False,
+    }
+    await fire_webhook(user["id"], payload)
+    return {"sent": True}
+
+
+# ---------------- Internal: inbound from Node service ----------------
+@api.post("/internal/inbound")
+async def inbound_message(payload: InboundIn, request: Request):
+    expected = os.environ.get("INTERNAL_SECRET", "")
+    got = request.headers.get("X-Internal-Secret", "")
+    if not expected or got != expected:
+        raise HTTPException(status_code=401, detail="invalid internal secret")
+
+    s = await db.wa_sessions.find_one({"id": payload.session_id})
+    if not s:
+        return {"ok": False, "reason": "session not found"}
+
+    user_id = s["user_id"]
+    msg_doc = {
+        "id": new_id(),
+        "user_id": user_id,
+        "session_id": payload.session_id,
+        "direction": "inbound",
+        "from": payload.from_,
+        "to": s.get("phone") or "",
+        "text": payload.text,
+        "type": payload.type,
+        "has_media": payload.has_media,
+        "wa_message_id": payload.message_id,
+        "status": "received",
+        "source": "inbound",
+        "sent_at": now_iso(),
+    }
+    await db.messages.insert_one(msg_doc)
+
+    asyncio.create_task(
+        fire_webhook(
+            user_id,
+            {
+                "event": "message.received",
+                "session_id": payload.session_id,
+                "from": payload.from_,
+                "text": payload.text,
+                "type": payload.type,
+                "message_id": payload.message_id,
+                "timestamp": payload.timestamp,
+                "has_media": payload.has_media,
+            },
+        )
+    )
+    return {"ok": True}
+
+
 @api.get("/messages")
 async def list_messages(
     user: dict = Depends(current_user),
     limit: int = Query(default=100, le=500),
     status: Optional[str] = None,
+    direction: Optional[str] = None,
 ):
     q: dict = {"user_id": user["id"]}
     if status:
         q["status"] = status
+    if direction in ("inbound", "outbound"):
+        q["direction"] = direction
     cursor = db.messages.find(q, {"_id": 0}).sort("sent_at", -1).limit(limit)
     return await cursor.to_list(length=limit)
 
@@ -528,6 +781,8 @@ async def user_from_api_key(request: Request) -> dict:
 @api.post("/v1/messages")
 async def public_send(payload: ApiSendIn, request: Request):
     user = await user_from_api_key(request)
+    if not payload.text and not payload.media_url:
+        raise HTTPException(status_code=400, detail="Either text or media_url is required")
     if payload.session_id:
         s = await db.wa_sessions.find_one(
             {"id": payload.session_id, "user_id": user["id"]}
@@ -540,7 +795,36 @@ async def public_send(payload: ApiSendIn, request: Request):
             detail="No connected WhatsApp session. Link a session first.",
         )
     await _enforce_quota(user, 1)
-    msg = await _send_one(user["id"], s["id"], payload.to, payload.text, "api")
+
+    if payload.media_url:
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as c:
+                r = await c.get(payload.media_url)
+                r.raise_for_status()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to fetch media_url: {e}")
+        url_path = httpx.URL(payload.media_url).path
+        ext = PathLib(url_path).suffix or ""
+        file_path = UPLOAD_DIR / f"{new_id()}{ext}"
+        file_path.write_bytes(r.content)
+        mime = (
+            r.headers.get("content-type", "application/octet-stream")
+            .split(";")[0]
+            .strip()
+        )
+        msg = await _send_media_one(
+            user["id"],
+            s["id"],
+            payload.to,
+            payload.caption or payload.text or "",
+            str(file_path),
+            payload.file_name or PathLib(url_path).name or "file",
+            mime,
+            "api_media",
+        )
+    else:
+        msg = await _send_one(user["id"], s["id"], payload.to, payload.text, "api")
+
     if msg["status"] == "sent":
         await db.users.update_one({"id": user["id"]}, {"$inc": {"quota_used": 1}})
     return {

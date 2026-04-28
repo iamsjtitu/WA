@@ -47,6 +47,36 @@ async def send_message(session_id: str, to: str, text: str) -> dict:
         return r.json()
 
 
+async def send_media(
+    session_id: str,
+    to: str,
+    file_path: str,
+    caption: str,
+    file_name: str,
+    mime_type: str,
+    delete_after: bool = True,
+) -> dict:
+    async with _client() as c:
+        r = await c.post(
+            f"/sessions/{session_id}/send-media",
+            json={
+                "to": to,
+                "file_path": file_path,
+                "caption": caption,
+                "file_name": file_name,
+                "mime_type": mime_type,
+                "delete_after": delete_after,
+            },
+        )
+        if r.status_code >= 400:
+            try:
+                detail = r.json().get("error", "send failed")
+            except Exception:
+                detail = "send failed"
+            raise RuntimeError(detail)
+        return r.json()
+
+
 async def health() -> bool:
     try:
         async with _client() as c:
