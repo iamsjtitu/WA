@@ -8,18 +8,26 @@ import { toast } from "sonner";
 export default function Register() {
   const { register } = useAuth();
   const navigate = useNavigate();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    phone: "",
+    company: "",
+    country: "",
+    city: "",
+  });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+
+  const set = (k) => (v) => setForm((s) => ({ ...s, [k]: v }));
 
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
     setErr("");
     try {
-      await register({ name, email, password });
+      await register(form);
       toast.success("Account created");
       navigate("/app", { replace: true });
     } catch (e) {
@@ -34,7 +42,7 @@ export default function Register() {
   return (
     <div className="min-h-screen grid lg:grid-cols-2 bg-white">
       <div className="flex items-center justify-center p-8 order-2 lg:order-1">
-        <div className="w-full max-w-sm">
+        <div className="w-full max-w-md">
           <h1 className="font-display text-3xl tracking-tight">Create your account</h1>
           <p className="text-neutral-600 text-sm mt-2">
             Already have one?{" "}
@@ -43,10 +51,22 @@ export default function Register() {
             </Link>
           </p>
 
-          <form onSubmit={submit} className="mt-8 space-y-4" data-testid="register-form">
-            <Field label="Name" data-testid="register-name-input" value={name} onChange={setName} placeholder="Acme Pvt. Ltd." />
-            <Field label="Email" type="email" data-testid="register-email-input" value={email} onChange={setEmail} placeholder="you@company.com" autoComplete="email" />
-            <Field label="Password" type="password" data-testid="register-password-input" value={password} onChange={setPassword} placeholder="min 6 characters" autoComplete="new-password" />
+          <form onSubmit={submit} className="mt-6 space-y-3" data-testid="register-form">
+            <Field label="Full Name *" testId="register-name-input" value={form.name} onChange={set("name")} placeholder="Acme Pvt. Ltd." />
+            <Field label="Email *" type="email" testId="register-email-input" value={form.email} onChange={set("email")} placeholder="you@company.com" autoComplete="email" />
+            <Field label="Password *" type="password" testId="register-password-input" value={form.password} onChange={set("password")} placeholder="min 6 characters" autoComplete="new-password" />
+
+            <div className="border-t border-neutral-200 pt-3 mt-3">
+              <p className="font-mono text-[10px] uppercase tracking-widest text-neutral-500 mb-3">
+                Profile (optional but helpful)
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Phone" testId="register-phone-input" value={form.phone} onChange={set("phone")} placeholder="+91 9876543210" required={false} />
+                <Field label="Company" testId="register-company-input" value={form.company} onChange={set("company")} placeholder="Acme Inc." required={false} />
+                <Field label="Country" testId="register-country-input" value={form.country} onChange={set("country")} placeholder="India" required={false} />
+                <Field label="City" testId="register-city-input" value={form.city} onChange={set("city")} placeholder="Mumbai" required={false} />
+              </div>
+            </div>
 
             {err && (
               <div className="text-sm text-red-600 font-mono" data-testid="register-error">
@@ -58,7 +78,7 @@ export default function Register() {
               data-testid="register-submit-button"
               type="submit"
               disabled={busy}
-              className="btn-brand w-full inline-flex items-center justify-center gap-2 disabled:opacity-50"
+              className="btn-brand w-full inline-flex items-center justify-center gap-2 disabled:opacity-50 mt-4"
             >
               {busy ? "Creating…" : "Create account"} <ArrowRight size={14} />
             </button>
@@ -92,14 +112,14 @@ export default function Register() {
   );
 }
 
-function Field({ label, value, onChange, type = "text", placeholder, autoComplete, ...rest }) {
+function Field({ label, value, onChange, type = "text", placeholder, autoComplete, testId, required = true }) {
   return (
     <div>
       <label className="font-mono text-[11px] uppercase tracking-widest text-neutral-500">{label}</label>
       <input
-        {...rest}
+        data-testid={testId}
         type={type}
-        required
+        required={required}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}

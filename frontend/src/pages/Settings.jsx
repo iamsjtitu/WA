@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { PageHeader } from "./Overview";
-import api from "../lib/api";
-import { Copy, ArrowsClockwise, LinkSimple, Trash, PaperPlaneTilt } from "@phosphor-icons/react";
+import api, { formatErr } from "../lib/api";
+import { Copy, ArrowsClockwise, LinkSimple, Trash, PaperPlaneTilt, Lock, User, Check } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 export default function Settings() {
@@ -38,7 +38,7 @@ export default function Settings() {
       await refresh();
       toast.success("Webhook saved");
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Failed");
+      toast.error(formatErr(e?.response?.data?.detail) || "Failed");
     }
     setBusy(false);
   };
@@ -63,21 +63,17 @@ export default function Settings() {
       await api.post("/me/webhook/test");
       toast.success("Test event dispatched — check your endpoint logs");
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Failed");
+      toast.error(formatErr(e?.response?.data?.detail) || "Failed");
     }
     setBusy(false);
   };
 
   return (
     <div className="p-10 fade-in max-w-3xl">
-      <PageHeader title="Settings" sub="Account, API key & inbound webhook." />
+      <PageHeader title="Settings" sub="Profile, credentials, API key, and webhook." />
 
-      <div className="mt-8 border border-neutral-200 sharp">
-        <Row label="Name" value={user?.name} />
-        <Row label="Email" value={user?.email} mono />
-        <Row label="Role" value={user?.role} mono />
-        <Row label="Member since" value={user?.created_at && new Date(user.created_at).toLocaleString()} mono />
-      </div>
+      <ProfileSection user={user} onSaved={refresh} />
+      <CredentialsSection onSaved={refresh} />
 
       <div className="mt-6 border border-neutral-200 sharp p-6">
         <p className="font-mono text-[11px] uppercase tracking-widest text-neutral-500">api key</p>
@@ -94,15 +90,13 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Webhook section */}
       <div className="mt-6 border border-neutral-200 sharp p-6" data-testid="webhook-section">
         <div className="flex items-center gap-2">
           <LinkSimple size={18} weight="fill" color="#1FA855" />
           <h3 className="font-display font-semibold text-lg tracking-tight">Inbound Webhook</h3>
         </div>
         <p className="text-sm text-neutral-600 mt-2">
-          When a connected WhatsApp number receives a message, we'll POST it to your endpoint signed
-          with HMAC-SHA256.
+          When a connected WhatsApp number receives a message, we'll POST it to your endpoint signed with HMAC-SHA256.
         </p>
 
         {user?.webhook_disabled && (
@@ -148,32 +142,15 @@ export default function Settings() {
           </div>
 
           <div className="flex gap-2 flex-wrap">
-            <button
-              type="submit"
-              disabled={busy}
-              className="btn-brand text-sm disabled:opacity-50"
-              data-testid="webhook-save-btn"
-            >
+            <button type="submit" disabled={busy} className="btn-brand text-sm disabled:opacity-50" data-testid="webhook-save-btn">
               {user?.webhook_url ? "Update" : "Save webhook"}
             </button>
             {user?.webhook_url && (
               <>
-                <button
-                  type="button"
-                  onClick={testWebhook}
-                  disabled={busy}
-                  className="btn-ghost text-sm inline-flex items-center gap-2 disabled:opacity-50"
-                  data-testid="webhook-test-btn"
-                >
+                <button type="button" onClick={testWebhook} disabled={busy} className="btn-ghost text-sm inline-flex items-center gap-2 disabled:opacity-50" data-testid="webhook-test-btn">
                   <PaperPlaneTilt size={14} /> Send test
                 </button>
-                <button
-                  type="button"
-                  onClick={clearWebhook}
-                  disabled={busy}
-                  className="btn-ghost text-sm inline-flex items-center gap-2 disabled:opacity-50 hover:!border-red-500 hover:!text-red-600"
-                  data-testid="webhook-clear-btn"
-                >
+                <button type="button" onClick={clearWebhook} disabled={busy} className="btn-ghost text-sm inline-flex items-center gap-2 disabled:opacity-50 hover:!border-red-500 hover:!text-red-600" data-testid="webhook-clear-btn">
                   <Trash size={14} /> Remove
                 </button>
               </>
@@ -192,12 +169,6 @@ export default function Settings() {
             <button onClick={() => copy(user.webhook_secret)} className="btn-ghost text-xs mt-2 inline-flex items-center gap-1" data-testid="copy-webhook-secret">
               <Copy size={12} /> Copy
             </button>
-            <p className="text-xs text-neutral-600 mt-3 leading-relaxed">
-              We sign each request with this secret using HMAC-SHA256, and send it in the{" "}
-              <span className="kbd">X-Wapihub-Signature</span> header (format:{" "}
-              <span className="kbd">sha256=&lt;hex&gt;</span>). Verify it on your end before
-              processing.
-            </p>
           </div>
         )}
       </div>
@@ -212,13 +183,160 @@ export default function Settings() {
   );
 }
 
-function Row({ label, value, mono }) {
+function ProfileSection({ user, onSaved }) {
+  const [form, setForm] = useState({
+    name: user?.name || "",
+    phone: user?.phone || "",
+    company: user?.company || "",
+    country: user?.country || "",
+    city: user?.city || "",
+  });
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setForm({
+      name: user?.name || "",
+      phone: user?.phone || "",
+      company: user?.company || "",
+      country: user?.country || "",
+      city: user?.city || "",
+    });
+  }, [user]);
+
+  const set = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target.value }));
+
+  const save = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await api.patch("/me/profile", form);
+      await onSaved?.();
+      toast.success("Profile updated");
+    } catch (e) {
+      toast.error(formatErr(e?.response?.data?.detail) || "Failed");
+    }
+    setBusy(false);
+  };
+
   return (
-    <div className="grid grid-cols-[180px_1fr] border-b border-neutral-200 last:border-b-0">
-      <div className="px-5 py-4 font-mono text-[11px] uppercase tracking-widest text-neutral-500 bg-neutral-50">
-        {label}
+    <form onSubmit={save} className="mt-8 border border-neutral-200 sharp p-6" data-testid="profile-section">
+      <div className="flex items-center gap-2">
+        <User size={18} weight="fill" color="#1FA855" />
+        <h3 className="font-display font-semibold text-lg tracking-tight">Profile</h3>
       </div>
-      <div className={`px-5 py-4 ${mono ? "font-mono text-sm" : ""}`}>{value || "—"}</div>
+      <div className="grid sm:grid-cols-2 gap-3 mt-4">
+        <Input label="Full Name" value={form.name} onChange={set("name")} testId="profile-name" />
+        <Input label="Phone" value={form.phone} onChange={set("phone")} placeholder="+91 9876543210" testId="profile-phone" />
+        <Input label="Company" value={form.company} onChange={set("company")} testId="profile-company" />
+        <Input label="Country" value={form.country} onChange={set("country")} testId="profile-country" />
+        <Input label="City" value={form.city} onChange={set("city")} testId="profile-city" />
+        <div>
+          <label className="font-mono text-[11px] uppercase tracking-widest text-neutral-500">Email</label>
+          <input
+            disabled
+            value={user?.email || ""}
+            className="w-full mt-1.5 border border-neutral-200 sharp px-3 py-2 bg-neutral-50 text-neutral-500 text-sm"
+          />
+          <p className="text-[10px] text-neutral-500 font-mono mt-1">change in Credentials section</p>
+        </div>
+      </div>
+      <div className="flex justify-end mt-4">
+        <button type="submit" disabled={busy} className="btn-brand text-sm inline-flex items-center gap-2 disabled:opacity-50" data-testid="profile-save-btn">
+          <Check size={14} /> {busy ? "Saving…" : "Save profile"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function CredentialsSection({ onSaved }) {
+  const [currentPw, setCurrentPw] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!currentPw) return toast.error("Enter your current password");
+    if (!newEmail && !newPw) return toast.error("Provide a new email or new password");
+    setBusy(true);
+    try {
+      await api.patch("/me/credentials", {
+        current_password: currentPw,
+        new_email: newEmail || null,
+        new_password: newPw || null,
+      });
+      await onSaved?.();
+      toast.success("Credentials updated");
+      setCurrentPw("");
+      setNewEmail("");
+      setNewPw("");
+    } catch (e) {
+      toast.error(formatErr(e?.response?.data?.detail) || "Failed");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <form onSubmit={submit} className="mt-6 border border-neutral-200 sharp p-6" data-testid="credentials-section">
+      <div className="flex items-center gap-2">
+        <Lock size={18} weight="fill" color="#1FA855" />
+        <h3 className="font-display font-semibold text-lg tracking-tight">Email & Password</h3>
+      </div>
+      <p className="text-sm text-neutral-600 mt-1">
+        Confirm with your current password. Leave blank to keep unchanged.
+      </p>
+      <div className="grid sm:grid-cols-2 gap-3 mt-4">
+        <Input
+          label="Current Password *"
+          type="password"
+          value={currentPw}
+          onChange={(e) => setCurrentPw(e.target.value)}
+          autoComplete="current-password"
+          testId="creds-current-pw"
+        />
+        <div />
+        <Input
+          label="New Email"
+          type="email"
+          value={newEmail}
+          onChange={(e) => setNewEmail(e.target.value)}
+          autoComplete="email"
+          placeholder="leave blank to keep"
+          testId="creds-new-email"
+        />
+        <Input
+          label="New Password"
+          type="password"
+          value={newPw}
+          onChange={(e) => setNewPw(e.target.value)}
+          autoComplete="new-password"
+          placeholder="leave blank to keep"
+          testId="creds-new-pw"
+        />
+      </div>
+      <div className="flex justify-end mt-4">
+        <button type="submit" disabled={busy} className="btn-brand text-sm inline-flex items-center gap-2 disabled:opacity-50" data-testid="creds-save-btn">
+          <Lock size={14} /> {busy ? "Updating…" : "Update credentials"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function Input({ label, value, onChange, type = "text", placeholder, autoComplete, testId }) {
+  return (
+    <div>
+      <label className="font-mono text-[11px] uppercase tracking-widest text-neutral-500">{label}</label>
+      <input
+        data-testid={testId}
+        type={type}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2 text-sm outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855]"
+      />
     </div>
   );
 }

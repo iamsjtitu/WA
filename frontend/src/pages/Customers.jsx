@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import api from "../lib/api";
 import { PageHeader } from "./Overview";
 import { Modal } from "./Sessions";
-import { Plus, Trash, Copy, Key, ArrowsClockwise } from "@phosphor-icons/react";
+import { Plus, Trash, Copy, ArrowsClockwise, Eye } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 export default function Customers() {
@@ -10,6 +10,7 @@ export default function Customers() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showKey, setShowKey] = useState(null);
+  const [viewing, setViewing] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -121,6 +122,21 @@ export default function Customers() {
                 </td>
                 <td className="text-right">
                   <div className="inline-flex gap-2">
+                    <button
+                      onClick={async () => {
+                        try {
+                          const { data } = await api.get(`/admin/customers/${c.id}`);
+                          setViewing(data);
+                        } catch (e) {
+                          toast.error("Failed to load customer");
+                        }
+                      }}
+                      className="btn-ghost text-xs inline-flex items-center gap-1"
+                      data-testid={`customer-view-${c.id}`}
+                      title="View profile"
+                    >
+                      <Eye size={12} />
+                    </button>
                     <button onClick={() => updateQuota(c)} className="btn-ghost text-xs" data-testid={`customer-quota-${c.id}`}>
                       Quota
                     </button>
@@ -159,6 +175,25 @@ export default function Customers() {
             <button onClick={() => copy(showKey.key)} className="btn-brand text-sm inline-flex items-center gap-2">
               <Copy size={14} /> Copy
             </button>
+          </div>
+        </Modal>
+      )}
+
+      {viewing && (
+        <Modal title={`Customer · ${viewing.user.name}`} onClose={() => setViewing(null)}>
+          <div className="space-y-3 text-sm" data-testid="customer-view-modal">
+            <DetailRow label="Email" value={viewing.user.email} mono />
+            <DetailRow label="Phone" value={viewing.user.phone || "—"} mono />
+            <DetailRow label="Company" value={viewing.user.company || "—"} />
+            <DetailRow label="Country / City" value={`${viewing.user.country || "—"} · ${viewing.user.city || "—"}`} />
+            <DetailRow label="Joined" value={new Date(viewing.user.created_at).toLocaleString()} mono />
+            <DetailRow label="API Key" value={viewing.user.api_key} mono break />
+            <DetailRow label="Quota" value={`${viewing.user.quota_used.toLocaleString()} / ${viewing.user.quota_monthly.toLocaleString()}`} mono />
+            <DetailRow label="Sessions" value={viewing.sessions_count} mono />
+            <DetailRow label="Total Messages" value={viewing.messages_total} mono />
+            {viewing.user.webhook_url && (
+              <DetailRow label="Webhook" value={viewing.user.webhook_url} mono break />
+            )}
           </div>
         </Modal>
       )}
@@ -221,6 +256,19 @@ function Input({ label, value, onChange, type = "text", testId }) {
         onChange={(e) => onChange(e.target.value)}
         className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2.5 outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855]"
       />
+    </div>
+  );
+}
+
+function DetailRow({ label, value, mono, break: brk }) {
+  return (
+    <div className="grid grid-cols-[140px_1fr] border-b border-neutral-100 last:border-b-0 py-2">
+      <div className="font-mono text-[11px] uppercase tracking-widest text-neutral-500">
+        {label}
+      </div>
+      <div className={`${mono ? "font-mono text-xs" : ""} ${brk ? "break-all" : ""}`}>
+        {value}
+      </div>
     </div>
   );
 }

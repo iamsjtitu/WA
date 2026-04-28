@@ -74,6 +74,24 @@ class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
     name: str = Field(min_length=1, max_length=80)
+    phone: Optional[str] = Field(default=None, max_length=20)
+    company: Optional[str] = Field(default=None, max_length=120)
+    country: Optional[str] = Field(default=None, max_length=80)
+    city: Optional[str] = Field(default=None, max_length=80)
+
+
+class ProfileUpdateIn(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    phone: Optional[str] = Field(default=None, max_length=20)
+    company: Optional[str] = Field(default=None, max_length=120)
+    country: Optional[str] = Field(default=None, max_length=80)
+    city: Optional[str] = Field(default=None, max_length=80)
+
+
+class CredentialsUpdateIn(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_email: Optional[EmailStr] = None
+    new_password: Optional[str] = Field(default=None, min_length=6, max_length=128)
 
 
 class LoginIn(BaseModel):
@@ -94,6 +112,10 @@ class UserOut(BaseModel):
     webhook_secret: Optional[str] = None
     webhook_disabled: bool = False
     webhook_consecutive_failures: int = 0
+    phone: Optional[str] = None
+    company: Optional[str] = None
+    country: Optional[str] = None
+    city: Optional[str] = None
 
 
 class CustomerCreateIn(BaseModel):
@@ -196,6 +218,10 @@ def user_to_out(u: dict) -> UserOut:
         webhook_secret=u.get("webhook_secret"),
         webhook_disabled=bool(u.get("webhook_disabled", False)),
         webhook_consecutive_failures=int(u.get("webhook_consecutive_failures", 0) or 0),
+        phone=u.get("phone"),
+        company=u.get("company"),
+        country=u.get("country"),
+        city=u.get("city"),
     )
 
 
@@ -304,6 +330,10 @@ async def register(payload: RegisterIn, response: Response):
         "api_key": gen_api_key(),
         "quota_monthly": 1000,
         "quota_used": 0,
+        "phone": (payload.phone or "").strip() or None,
+        "company": (payload.company or "").strip() or None,
+        "country": (payload.country or "").strip() or None,
+        "city": (payload.city or "").strip() or None,
         "created_at": now_iso(),
     }
     await db.users.insert_one(user_doc)
@@ -377,6 +407,22 @@ async def list_customers(_: dict = Depends(admin_only)):
     cursor = db.users.find({"role": "customer"}, {"_id": 0, "password_hash": 0})
     customers = await cursor.to_list(length=1000)
     return [user_to_out(c).model_dump() for c in customers]
+
+
+@api.get("/admin/customers/{customer_id}")
+async def get_customer(customer_id: str, _: dict = Depends(admin_only)):
+    user = await db.users.find_one(
+        {"id": customer_id, "role": "customer"}, {"_id": 0, "password_hash": 0}
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    sessions_count = await db.wa_sessions.count_documents({"user_id": customer_id})
+    msgs_total = await db.messages.count_documents({"user_id": customer_id})
+    return {
+        "user": user_to_out(user).model_dump(),
+        "sessions_count": sessions_count,
+        "messages_total": msgs_total,
+    }
 
 
 @api.post("/admin/customers")
@@ -471,6 +517,52 @@ async def regen_my_key(user: dict = Depends(current_user)):
     new_key = gen_api_key()
     await db.users.update_one({"id": user["id"]}, {"$set": {"api_key": new_key}})
     return {"api_key": new_key}
+
+
+@api.patch("/me/profile")
+async def update_my_profile(payload: ProfileUpdateIn, user: dict = Depends(current_user)):
+    update = {}
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        if v is not None:
+            update[k] = v.strip() if isinstance(v, str) else v
+    if not update:
+        return user_to_out(user)
+    await db.users.update_one({"id": user["id"]}, {"$set": update})
+    refreshed = await db.users.find_one(
+        {"id": user["id"]}, {"_id": 0, "password_hash": 0}
+    )
+    return user_to_out(refreshed)
+
+
+@api.patch("/me/credentials")
+async def update_my_credentials(
+    payload: CredentialsUpdateIn, response: Response, user: dict = Depends(current_user)
+):
+    full = await db.users.find_one({"id": user["id"]})
+    if not full or not auth_mod.verify_password(payload.current_password, full["password_hash"]):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    update: dict = {}
+    if payload.new_email:
+        new_email = payload.new_email.lower().strip()
+        if new_email != full["email"]:
+            existing = await db.users.find_one({"email": new_email, "id": {"$ne": user["id"]}})
+            if existing:
+                raise HTTPException(status_code=400, detail="Email already in use")
+            update["email"] = new_email
+    if payload.new_password:
+        update["password_hash"] = auth_mod.hash_password(payload.new_password)
+    if not update:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    await db.users.update_one({"id": user["id"]}, {"$set": update})
+
+    refreshed = await db.users.find_one(
+        {"id": user["id"]}, {"_id": 0, "password_hash": 0}
+    )
+    access = auth_mod.create_access_token(refreshed["id"], refreshed["email"], refreshed["role"])
+    refresh = auth_mod.create_refresh_token(refreshed["id"])
+    auth_mod.set_auth_cookies(response, access, refresh)
+    return user_to_out(refreshed)
 
 
 @api.get("/me/stats")
