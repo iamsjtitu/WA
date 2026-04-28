@@ -39,6 +39,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 import auth as auth_mod
 import billing as billing_mod
+import email_service
 import system_admin
 import v2_compat
 import wa_client
@@ -119,6 +120,7 @@ class UserOut(BaseModel):
     city: Optional[str] = None
     impersonated_by: Optional[str] = None
     impersonated_by_email: Optional[str] = None
+    email_notifications: bool = True
 
 
 class CustomerCreateIn(BaseModel):
@@ -169,6 +171,10 @@ class ApiSendIn(BaseModel):
 
 class WebhookSetIn(BaseModel):
     url: str = Field(min_length=8, max_length=500)
+
+
+class NotificationsIn(BaseModel):
+    email_notifications: bool
 
 
 class InboundIn(BaseModel):
@@ -227,6 +233,7 @@ def user_to_out(u: dict) -> UserOut:
         city=u.get("city"),
         impersonated_by=u.get("impersonated_by"),
         impersonated_by_email=u.get("impersonated_by_email"),
+        email_notifications=bool(u.get("email_notifications", True)),
     )
 
 
@@ -704,6 +711,20 @@ async def update_my_credentials(
     return user_to_out(refreshed)
 
 
+@api.patch("/me/notifications")
+async def update_my_notifications(
+    payload: NotificationsIn, user: dict = Depends(current_user)
+):
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"email_notifications": bool(payload.email_notifications)}},
+    )
+    refreshed = await db.users.find_one(
+        {"id": user["id"]}, {"_id": 0, "password_hash": 0}
+    )
+    return user_to_out(refreshed)
+
+
 @api.get("/me/stats")
 async def my_stats(user: dict = Depends(current_user)):
     sessions_count = await db.wa_sessions.count_documents({"user_id": user["id"]})
@@ -972,6 +993,27 @@ async def _enforce_quota(user: dict, count: int):
         )
 
 
+async def _check_quota_warning(user_id: str):
+    """Fire a one-time email when usage crosses the 90% threshold."""
+    u = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    if not u:
+        return
+    quota = int(u.get("quota_monthly", 0) or 0)
+    used = int(u.get("quota_used", 0) or 0)
+    if quota <= 0:
+        return
+    pct = (used / quota) * 100
+    if pct < 90 or pct >= 100:
+        return
+    if u.get("quota_warned_at"):
+        return  # already warned this period
+    await db.users.update_one(
+        {"id": user_id, "quota_warned_at": {"$exists": False}},
+        {"$set": {"quota_warned_at": now_iso()}},
+    )
+    asyncio.create_task(email_service.notify_quota_warning(u, used, quota))
+
+
 @api.post("/messages/send")
 async def send_message_dashboard(
     payload: SendMessageIn, user: dict = Depends(current_user)
@@ -983,6 +1025,7 @@ async def send_message_dashboard(
     msg = await _send_one(user["id"], payload.session_id, payload.to, payload.text, "dashboard")
     if msg["status"] == "sent":
         await db.users.update_one({"id": user["id"]}, {"$inc": {"quota_used": 1}})
+        await _check_quota_warning(user["id"])
     return msg
 
 
@@ -1006,6 +1049,7 @@ async def send_bulk_dashboard(payload: BulkSendIn, user: dict = Depends(current_
         await asyncio.sleep(0.6)
     if sent_count:
         await db.users.update_one({"id": user["id"]}, {"$inc": {"quota_used": sent_count}})
+        await _check_quota_warning(user["id"])
     return {"total": len(recipients), "sent": sent_count, "failed": len(recipients) - sent_count, "results": results}
 
 
@@ -1042,6 +1086,7 @@ async def send_media_dashboard(
     )
     if msg["status"] == "sent":
         await db.users.update_one({"id": user["id"]}, {"$inc": {"quota_used": 1}})
+        await _check_quota_warning(user["id"])
     return msg
 
 
@@ -1257,6 +1302,7 @@ async def bulk_csv_send(
         await asyncio.sleep(0.6)
     if sent_count:
         await db.users.update_one({"id": user["id"]}, {"$inc": {"quota_used": sent_count}})
+        await _check_quota_warning(user["id"])
     return {"total": len(rows), "sent": sent_count, "failed": failed, "results": results}
 
 
@@ -1336,6 +1382,7 @@ async def public_send(payload: ApiSendIn, request: Request):
 
     if msg["status"] == "sent":
         await db.users.update_one({"id": user["id"]}, {"$inc": {"quota_used": 1}})
+        await _check_quota_warning(user["id"])
     return {
         "status": msg["status"],
         "message_id": msg.get("wa_message_id"),
@@ -1383,6 +1430,68 @@ async def download_woocommerce_plugin():
     if not p.exists():
         raise HTTPException(status_code=404, detail="plugin not built")
     return FileResponse(p, media_type="application/zip", filename="wa9x-woocommerce.zip")
+
+
+def _connection_state(status: str) -> str:
+    """Bucket every WA status into 'connected', 'disconnected', or 'transient'.
+
+    Emails fire only on transitions between connected ↔ disconnected; the
+    transient bucket (qr, pairing, starting, …) is ignored to avoid noise.
+    """
+    s = (status or "").lower()
+    if s in ("connected", "open", "ready"):
+        return "connected"
+    if s in ("disconnected", "logged_out", "logged-out", "closed", "auth_failure"):
+        return "disconnected"
+    return "transient"
+
+
+async def _session_health_monitor():
+    """Detect connected ↔ disconnected transitions and email the owner."""
+    while True:
+        try:
+            cursor = db.wa_sessions.find({}, {"_id": 0})
+            sessions = await cursor.to_list(length=500)
+            for s in sessions:
+                try:
+                    live = await wa_client.session_status(s["id"])
+                except Exception:
+                    continue
+                live_state = _connection_state(live.get("status", ""))
+                if live_state == "transient":
+                    continue
+                last_state = s.get("last_state")
+                if live_state == last_state:
+                    continue
+                # transition detected — persist + maybe email
+                await db.wa_sessions.update_one(
+                    {"id": s["id"]},
+                    {"$set": {"last_state": live_state, "last_state_at": now_iso()}},
+                )
+                if last_state is None:
+                    # first observation, don't spam
+                    continue
+                user = await db.users.find_one(
+                    {"id": s["user_id"]}, {"_id": 0, "password_hash": 0}
+                )
+                if not user:
+                    continue
+                if live_state == "disconnected":
+                    asyncio.create_task(
+                        email_service.notify_disconnect(
+                            user, s.get("name") or "Your service"
+                        )
+                    )
+                elif live_state == "connected":
+                    asyncio.create_task(
+                        email_service.notify_reconnect(
+                            user, s.get("name") or "Your service"
+                        )
+                    )
+        except Exception:
+            logger.exception("session health monitor error")
+        await asyncio.sleep(60)
+
 
 
 # ---------------- Wire app ----------------
@@ -1491,6 +1600,7 @@ async def _scheduled_dispatcher():
                         await db.users.update_one(
                             {"id": user["id"]}, {"$inc": {"quota_used": 1}}
                         )
+                        await _check_quota_warning(user["id"])
                     await db.scheduled_messages.update_one(
                         {"id": sched["id"]},
                         {
@@ -1539,6 +1649,8 @@ async def on_startup():
 
     # spawn scheduled message dispatcher
     asyncio.create_task(_scheduled_dispatcher())
+    # spawn session health monitor (disconnect/reconnect emails)
+    asyncio.create_task(_session_health_monitor())
 
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@wa9x.com").lower()
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")

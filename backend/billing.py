@@ -1,6 +1,7 @@
 """Billing module — Plans (admin) + Subscriptions via Stripe / Razorpay / PayPal."""
 from __future__ import annotations
 
+import asyncio
 import hmac
 import hashlib
 import json
@@ -15,6 +16,8 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
+
+import email_service
 
 logger = logging.getLogger("wa9x.billing")
 
@@ -469,10 +472,26 @@ def make_router(db, current_user, admin_only):
             if sub_doc:
                 await cancel_subscription_db(db, sub_doc["user_id"], "stripe")
         elif etype == "invoice.payment_failed":
+            sub_id = data.get("subscription")
             await db.subscriptions.update_one(
-                {"gateway_subscription_id": data.get("subscription")},
+                {"gateway_subscription_id": sub_id},
                 {"$set": {"status": "past_due", "updated_at": now_iso()}},
             )
+            sub_doc = await db.subscriptions.find_one(
+                {"gateway_subscription_id": sub_id}, {"_id": 0}
+            )
+            if sub_doc:
+                user = await db.users.find_one(
+                    {"id": sub_doc["user_id"]}, {"_id": 0, "password_hash": 0}
+                )
+                if user:
+                    plan_name = sub_doc.get("plan_name", "your plan")
+                    reason = (data.get("last_payment_error") or {}).get(
+                        "message"
+                    ) or data.get("billing_reason", "")
+                    asyncio.create_task(
+                        email_service.notify_payment_failed(user, plan_name, reason)
+                    )
         return {"ok": True}
 
     # =========== Razorpay ===========
@@ -555,6 +574,29 @@ def make_router(db, current_user, admin_only):
             )
             if sub_doc:
                 await cancel_subscription_db(db, sub_doc["user_id"], "razorpay")
+        elif etype in ("payment.failed", "subscription.charged.failed"):
+            sub = payload.get("subscription", {}).get("entity", {}) or {}
+            payment = payload.get("payment", {}).get("entity", {}) or {}
+            sub_id = sub.get("id") or payment.get("subscription_id")
+            sub_doc = await db.subscriptions.find_one(
+                {"gateway_subscription_id": sub_id}, {"_id": 0}
+            )
+            if sub_doc:
+                await db.subscriptions.update_one(
+                    {"gateway_subscription_id": sub_id},
+                    {"$set": {"status": "past_due", "updated_at": now_iso()}},
+                )
+                user = await db.users.find_one(
+                    {"id": sub_doc["user_id"]}, {"_id": 0, "password_hash": 0}
+                )
+                if user:
+                    asyncio.create_task(
+                        email_service.notify_payment_failed(
+                            user,
+                            sub_doc.get("plan_name", "your plan"),
+                            payment.get("error_description", ""),
+                        )
+                    )
         return {"ok": True}
 
     # =========== PayPal ===========
@@ -670,6 +712,31 @@ def make_router(db, current_user, admin_only):
             )
             if sub_doc:
                 await cancel_subscription_db(db, sub_doc["user_id"], "paypal")
+        elif etype in (
+            "BILLING.SUBSCRIPTION.PAYMENT.FAILED",
+            "PAYMENT.SALE.DENIED",
+            "PAYMENT.CAPTURE.DENIED",
+        ):
+            sid = resource.get("billing_agreement_id") or resource.get("id")
+            sub_doc = await db.subscriptions.find_one(
+                {"gateway_subscription_id": sid}, {"_id": 0}
+            )
+            if sub_doc:
+                await db.subscriptions.update_one(
+                    {"gateway_subscription_id": sid},
+                    {"$set": {"status": "past_due", "updated_at": now_iso()}},
+                )
+                user = await db.users.find_one(
+                    {"id": sub_doc["user_id"]}, {"_id": 0, "password_hash": 0}
+                )
+                if user:
+                    asyncio.create_task(
+                        email_service.notify_payment_failed(
+                            user,
+                            sub_doc.get("plan_name", "your plan"),
+                            resource.get("status_details", {}).get("reason", ""),
+                        )
+                    )
         return {"ok": True}
 
     return api

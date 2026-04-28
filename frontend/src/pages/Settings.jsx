@@ -173,6 +173,41 @@ export default function Settings() {
         )}
       </div>
 
+      <div className="mt-6 border border-neutral-200 sharp p-6" data-testid="email-notifications-section">
+        <div className="flex items-center gap-2">
+          <PaperPlaneTilt size={18} weight="fill" color="#1FA855" />
+          <h3 className="font-display font-semibold text-lg tracking-tight">Email Notifications</h3>
+        </div>
+        <p className="text-sm text-neutral-600 mt-2">
+          Get an email at <strong>{user?.email}</strong> when a service disconnects, reconnects,
+          when you cross 90% of your monthly quota, or when a payment fails.
+        </p>
+        <label className="mt-4 flex items-center gap-3 cursor-pointer select-none" data-testid="email-notifications-label">
+          <input
+            type="checkbox"
+            data-testid="email-notifications-toggle"
+            checked={user?.email_notifications !== false}
+            onChange={async (e) => {
+              try {
+                await api.patch("/me/notifications", {
+                  email_notifications: e.target.checked,
+                });
+                await refresh();
+                toast.success(
+                  e.target.checked ? "Email notifications enabled" : "Email notifications disabled"
+                );
+              } catch (err) {
+                toast.error(formatErr(err?.response?.data?.detail) || "Failed");
+              }
+            }}
+            className="w-4 h-4 accent-[#1FA855]"
+          />
+          <span className="text-sm">
+            Send me email alerts for service events
+          </span>
+        </label>
+      </div>
+
       <div className="mt-6 border border-neutral-200 sharp p-6 bg-neutral-50">
         <p className="font-mono text-[11px] uppercase tracking-widest text-neutral-500">quota</p>
         <p className="text-sm mt-2">
