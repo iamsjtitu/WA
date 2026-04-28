@@ -1,65 +1,49 @@
-# WapiHub — Product Requirements Document
+# wa.9x.design — Product Requirements Document
 
 ## Original Problem Statement
-"kya hum 360messenger.com jaisa khud ka bana sakte hai?" — Build own WhatsApp messaging API platform for personal/reseller use, give API access to customers.
+"kya hum 360messenger.com jaisa khud ka bana sakte hai?" — Build own WhatsApp messaging API platform under brand **wa.9x.design** for personal/reseller use.
 
 ## Architecture
-- **Node.js Baileys microservice** (`/app/wa-service/`, port 3001) — auto-spawned, watchdog respawn, configurable WA_AUTH_DIR.
+- **Node.js Baileys microservice** (`/app/wa-service/`, port 3001) — auto-spawned, watchdog respawn, configurable WA_AUTH_DIR, **pairing-code support** via `requestPairingCode()`.
 - **FastAPI backend** (`/app/backend/`, port 8001):
-  - `server.py` — auth, sessions, messages, webhooks, plugins, scheduler dispatcher
+  - `server.py` — auth, sessions, messages, webhooks, plugins, scheduler
   - `billing.py` — plans + Stripe/Razorpay/PayPal subscriptions
-  - `v2_compat.py` — 360messenger-compatible v2 API
-  - `auth.py` — JWT helpers
-  - `wa_client.py` / `wa_supervisor.py` — Node service control
-- **React frontend** — Landing, Auth, Dashboard (Overview, Sessions, **SessionDetail**, Send, BulkSend, Logs, ApiDocs, Customers, Plans, Billing, Settings)
+  - `v2_compat.py` — legacy v2 API (Bearer auth, multipart, drop-in compatible)
+  - `auth.py` / `wa_client.py` / `wa_supervisor.py`
+- **React frontend** — Landing, Auth, Dashboard (Overview, Services, ServiceCreate, ServiceDetail, Send, Bulk, Logs, ApiDocs, Customers, Plans, Billing, Settings)
+
+## Brand & Theme
+- Display name: **wa.9x.design**
+- Primary color: WhatsApp green `#1FA855`
+- API key prefix: `wa9x_`
+- Admin email: `admin@wa.9x.design` / `admin123`
+- All references to "WapiHub" / "360messenger" purged from code & assets
 
 ## Implementation History
 
-### Iteration 1 — MVP (29/29 tests)
-JWT auth, sessions CRUD, send/bulk text, message logs, public v1 API, landing page.
+| Iter | Tests | Highlights |
+|---|---|---|
+| 1 | 29/29 | MVP — JWT auth, sessions, send/bulk text, public v1 API, landing |
+| 2 | 46/46 | Inbound webhooks (HMAC), media upload + media_url, watchdog respawn |
+| 3 | 72/72 | Webhook retry/auto-disable, inbound media download, CSV+templates, admin Plans CRUD, Stripe + Razorpay + PayPal billing |
+| 4 | 94/94 | v2 API compat layer (sendMessage/sendGroup/status/sentMessages/receivedMessages/account), schedule/delay dispatcher (60s loop), per-session settings, ServiceDetail page, WHMCS+WooCommerce plugins |
+| 5 | 110+1/111 | **Full rebrand to wa.9x.design** + **5-step ServiceCreate wizard** with Baileys phone-number pairing-code support, green theme, terminology refresh |
 
-### Iteration 2 — Webhooks + Media + Resilience (46/46 tests)
-HMAC inbound webhooks, Node→FastAPI internal endpoint, dashboard media upload, public API media_url, Node watchdog, port-conflict check.
+### Iteration 5 — wa.9x.design Rebrand & Pairing Code (110/111 + 1 fix = 111/111)
+- ✅ Mass rebrand: WapiHub→wa.9x.design, 360messenger refs purged, color blue→green, api key prefix wapi_→wa9x_
+- ✅ Admin email seamlessly migrated; old admin@wapihub.com correctly returns 401
+- ✅ **Baileys pairing code via phone**: new `POST /api/sessions/{id}/pair {phone}` proxies to `sock.requestPairingCode()`, returns 8-char code displayed in step 5 of wizard (verified live: real "4DTV6BW1" code generated)
+- ✅ Session status endpoint now surfaces `pairing_code` and `pairing_phone` (post-fix)
+- ✅ **5-step ServiceCreate wizard** at `/app/sessions/new`:
+  1. Choose Method (Phone Number / Scan QR Code) + Service Name
+  2. Phone input with 20 country codes
+  3. Service Usage Guidelines (5 numbered points + warning + agreement checkbox)
+  4. Preparing animation (4 sub-steps with green checkmarks)
+  5. Pairing Code OR QR display with 15-min expiry + auto-check polling
+- ✅ Plugin filenames renamed to `wa9x.php` / `wa9x-woocommerce.php`
+- ✅ Webhook UA: `wa.9x.design-Webhook/1.0`
 
-### Iteration 3 — Billing + CSV + Retries + Inbound Media Download (72/72 tests)
-Webhook retry [2s, 6s, 18s] + auto-disable after 10 failures, inbound media auto-download served at `/api/media/{id}`, CSV bulk with `{{var}}` templates, admin Plans CRUD, full Stripe + Razorpay + PayPal subscription billing (gracefully degraded when keys missing).
-
-### Iteration 4 — 360messenger Parity (94/94 tests)
-- ✅ **v2 API compatibility layer** (`v2_compat.py`):
-  - `POST /api/v2/sendMessage` — multipart phonenumber/text/url/delay, Bearer auth, returns 201 with 360-style response shape
-  - `POST /api/v2/sendGroup` — group jid `{groupId}@g.us` send via Baileys
-  - `GET /api/v2/message/status?id=`, `/sentMessages`, `/receivedMessages`, `/account`
-  - Bearer (Authorization), X-API-Key, or `?token=` auth all accepted
-  - Delay format: `MM-DD-YYYY HH:MM` GMT (per 360messenger spec); past/invalid delays return 400
-- ✅ **Schedule/delay**: `db.scheduled_messages` collection + async dispatcher loop (60s) that claims pending docs (status: pending → running → sent/failed), increments quota only on success
-- ✅ **Per-session settings**: `default_country_code`, `auto_prefix`, `receive_messages`, `mark_as_seen` on `wa_sessions`. PATCH `/api/sessions/{id}/settings`
-- ✅ **Service Detail page** (`/app/sessions/{id}`) matches 360messenger layout exactly:
-  - Top stat cards (Service ID, Connected Number, Status, Quota)
-  - API Key card with copy + Bearer hint
-  - Connection Status card with Show QR / Restart / Disconnect actions
-  - 3-column inline: Received / Sent / Send Message form (with link + schedule)
-  - Account Settings (3 toggles) + Webhook URL + Service Management (Cancel/Renew/Upgrade)
-  - Live polling every 5s
-- ✅ **WHMCS plugin** (`/api/plugins/whmcs.zip`) — PHP module with curl helper for invoice/ticket hooks
-- ✅ **WooCommerce plugin** (`/api/plugins/woocommerce.zip`) — auto-WhatsApp on order paid/processing with `{{name}}` `{{order_id}}` `{{total}}` template variables, settings page in WP admin
-- ✅ **Group send via Node** — `/sessions/:id/send-group` endpoint with text or url/media
-
-## Configuration (env vars)
-```
-WA_AUTH_DIR=/app/wa-service/auth
-INTERNAL_SECRET=<long-random>
-BACKEND_PUBLIC_URL=https://...
-FRONTEND_URL=https://...
-JWT_SECRET=<long-random>
-ADMIN_EMAIL / ADMIN_PASSWORD
-
-# Payment gateways (admin fills in production)
-STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
-RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET
-PAYPAL_MODE=sandbox|live, PAYPAL_CLIENT_ID, PAYPAL_SECRET, PAYPAL_WEBHOOK_ID
-```
-
-## v2 API endpoints (360messenger-compatible)
+## v2 API endpoints (drop-in legacy compat)
 | Method | Path | Auth | Body |
 |---|---|---|---|
 | POST | `/api/v2/sendMessage` | Bearer | multipart: phonenumber, text, url?, delay? |
@@ -69,22 +53,38 @@ PAYPAL_MODE=sandbox|live, PAYPAL_CLIENT_ID, PAYPAL_SECRET, PAYPAL_WEBHOOK_ID
 | GET | `/api/v2/message/receivedMessages` | Bearer | ?page=&phonenumber= |
 | GET | `/api/v2/account` | Bearer | — |
 
+Delay format: `MM-DD-YYYY HH:MM` (GMT). Past/invalid delays return 400.
+
+## Configuration (env vars)
+```
+WA_AUTH_DIR=/app/wa-service/auth
+INTERNAL_SECRET=<long-random>
+BACKEND_PUBLIC_URL=https://...
+FRONTEND_URL=https://...
+JWT_SECRET=<long-random>
+ADMIN_EMAIL=admin@wa.9x.design / ADMIN_PASSWORD=admin123
+
+STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET
+PAYPAL_MODE=sandbox|live, PAYPAL_CLIENT_ID, PAYPAL_SECRET, PAYPAL_WEBHOOK_ID
+```
+
 ## Backlog / Known Improvements
-- **P1**: SSRF guard + content-length cap on v2/sendMessage `url=` fetch (currently no max-size)
-- **P1**: Phone country-code heuristic (`len <= 11`) is fragile — make deterministic
-- **P1**: Bulk CSV with 500+ rows hits ingress timeout — needs background job queue
+- **P1**: SSRF / size-cap guards on `media_url` and `v2/sendMessage url=` server-side fetch
+- **P1**: Phone country-code heuristic (currently `len <= 11`) is fragile — replace with deterministic
+- **P1**: Bulk CSV with 500+ rows → background job (Celery/RQ)
 - **P1**: Rate limiting + brute-force lockout on `/auth/login`
-- **P2**: Stuck-job recovery for scheduled_messages stuck in `running` (TTL >5min)
-- **P2**: Stripe Customer Portal, PayPal webhook signature verification, Razorpay webhook secret enforcement
-- **P2**: `?token=` query auth leaks into nginx logs — drop or rate-limit
-- **P2**: Pagination cursor on `/sessions/{id}/messages` (currently capped 200)
-- **P2**: server.py is 1346 lines — split into routers/ subpackage
-- **P3**: Move inbound media to S3 for multi-pod scale, group chat features beyond send, password reset, 2FA, whitelabel domains, sub-customers (reseller of resellers)
+- **P1**: PairIn validation: digits-only + plausible E.164 length
+- **P2**: HTTP status 201 vs body statusCode mismatch on v2 schedule path
+- **P2**: scheduled_messages stuck-in-`running` recovery (>5min TTL)
+- **P2**: Pair endpoint error mapping (already-registered → 409)
+- **P2**: Drop `?token=` query auth (leaks into nginx logs)
+- **P2**: server.py 1364 lines — split into routers/ subpackage
+- **P2**: PayPal webhook signature verification + Razorpay webhook secret enforcement
+- **P3**: Inbound media → S3 for multi-pod scale, group features, password reset, 2FA, whitelabel domains, sub-customers (reseller-of-resellers)
 
 ## Next Tasks (User)
-1. **Real WhatsApp QR scan** — link a number, scan, send/receive on real WhatsApp.
-2. **Add payment gateway keys** to `/app/backend/.env`, restart backend, register webhook URLs:
-   - Stripe → `{BACKEND_URL}/api/webhooks/stripe`
-   - Razorpay → `{BACKEND_URL}/api/webhooks/razorpay`
-   - PayPal → `{BACKEND_URL}/api/webhooks/paypal`
-3. **Test plugin downloads** — install WHMCS module / WooCommerce plugin in your dev sites.
+1. **Production**: Point `WA_AUTH_DIR` to a persistent volume so QR/pair links survive redeploys.
+2. **Real WhatsApp link** — admin@wa.9x.design → /app/sessions/new → choose method → live test send/receive.
+3. **Add gateway keys** to `/app/backend/.env`, restart, register webhook URLs at each provider.
+4. **Plugins** — install WHMCS / WooCommerce plugins on dev sites and verify event firing.

@@ -594,7 +594,13 @@ async def get_session_status(session_id: str, user: dict = Depends(current_user)
     if live.get("phone"):
         update["phone"] = live["phone"]
     await db.wa_sessions.update_one({"id": session_id}, {"$set": update})
-    return {**s, **update, "qr": live.get("qr")}
+    return {
+        **s,
+        **update,
+        "qr": live.get("qr"),
+        "pairing_code": live.get("pairing_code"),
+        "pairing_phone": live.get("pairing_phone"),
+    }
 
 
 @api.post("/sessions/{session_id}/restart")
