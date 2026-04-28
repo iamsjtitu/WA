@@ -472,4 +472,24 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             "timestamp": now_ts(),
         }
 
+    @api.get("/v2/groups")
+    async def list_groups_v2(request: Request):
+        """List all WhatsApp groups the connected session is part of."""
+        user = await user_from_bearer(request)
+        session = await _resolve_session(user["id"])
+        try:
+            result = await wa_client.list_groups(session["id"])
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        groups = result.get("groups", [])
+        return {
+            "success": True,
+            "statusCode": 200,
+            "timestamp": now_ts(),
+            "result": {
+                "count": len(groups),
+                "data": groups,
+            },
+        }
+
     return api

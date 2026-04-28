@@ -66,6 +66,18 @@ async def send_group(
         return r.json()
 
 
+async def list_groups(session_id: str) -> dict:
+    async with _client() as c:
+        r = await c.get(f"/sessions/{session_id}/groups")
+        if r.status_code >= 400:
+            try:
+                detail = r.json().get("error", "list groups failed")
+            except Exception:
+                detail = "list groups failed"
+            raise RuntimeError(detail)
+        return r.json()
+
+
 async def request_pairing_code(session_id: str, phone: str) -> dict:
     async with _client() as c:
         r = await c.post(

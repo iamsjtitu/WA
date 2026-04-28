@@ -36,6 +36,7 @@ const SECTIONS = [
     items: [
       { id: "v2-send", label: "Send Message", method: "POST" },
       { id: "v2-group", label: "Send Group Message", method: "POST" },
+      { id: "v2-groups-list", label: "List Groups", method: "GET" },
       { id: "v2-status", label: "Get Message Status", method: "GET" },
       { id: "v2-sent", label: "List Sent Messages", method: "GET" },
       { id: "v2-recv", label: "List Received Messages", method: "GET" },
@@ -358,6 +359,55 @@ console.log(await r.json());`,
   "data": {
     "groupId": "1203********",
     "id": "d8fdf876-d54b-4522-bcf5-fabc8802fcbd"
+  }
+}`,
+      },
+    },
+    {
+      id: "v2-groups-list",
+      method: "GET",
+      path: "/v2/groups",
+      title: "List Groups",
+      description:
+        "Returns every WhatsApp group your connected session is a member of, including group id, subject, member count, and admin status. Use the returned id with sendGroup.",
+      auth: "Bearer Token",
+      samples: {
+        cURL: `curl '${API_BASE}/v2/groups' \\
+  --header 'Authorization: Bearer YOUR_API_KEY'`,
+        Python: `import requests
+r = requests.get(
+    "${API_BASE}/v2/groups",
+    headers={"Authorization": "Bearer YOUR_API_KEY"},
+)
+for g in r.json()["result"]["data"]:
+    print(g["id"], g["subject"], g["size"])`,
+        Node: `const r = await fetch("${API_BASE}/v2/groups", {
+  headers: { Authorization: "Bearer YOUR_API_KEY" },
+});
+const { result } = await r.json();
+console.log(result.data);`,
+      },
+      response: {
+        status: 200,
+        body: `{
+  "success": true,
+  "statusCode": 200,
+  "result": {
+    "count": 2,
+    "data": [
+      {
+        "id": "1203********",
+        "jid": "1203********@g.us",
+        "subject": "Marketing Team",
+        "desc": "Internal announcements",
+        "owner": "447488888888",
+        "creation": 1716893012,
+        "size": 14,
+        "announce": false,
+        "restrict": false,
+        "is_admin": true
+      }
+    ]
   }
 }`,
       },

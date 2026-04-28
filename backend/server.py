@@ -869,6 +869,21 @@ async def get_session_status(session_id: str, user: dict = Depends(current_user)
     }
 
 
+@api.get("/sessions/{session_id}/groups")
+async def list_session_groups(session_id: str, user: dict = Depends(current_user)):
+    """List all WhatsApp groups this session participates in."""
+    s = await db.wa_sessions.find_one(
+        {"id": session_id, "user_id": user["id"]}, {"_id": 0}
+    )
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        result = await wa_client.list_groups(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
 @api.post("/sessions/{session_id}/restart")
 async def restart_session(session_id: str, user: dict = Depends(current_user)):
     s = await db.wa_sessions.find_one({"id": session_id, "user_id": user["id"]})

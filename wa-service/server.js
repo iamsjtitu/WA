@@ -399,6 +399,39 @@ app.post("/sessions/:id/send-media", async (req, res) => {
   }
 });
 
+app.get("/sessions/:id/groups", async (req, res) => {
+  const id = req.params.id;
+  const m = ensureSession(id);
+  if (!m || m.status !== "connected") {
+    return res.status(400).json({
+      error: `session not connected (status=${m?.status || "not_started"})`,
+    });
+  }
+  try {
+    const all = await m.sock.groupFetchAllParticipating();
+    const list = Object.values(all).map((g) => ({
+      id: g.id?.replace(/@g\.us$/, ""),
+      jid: g.id,
+      subject: g.subject || "",
+      desc: g.desc || "",
+      owner: (g.owner || "").replace(/@s\.whatsapp\.net$/, ""),
+      creation: g.creation || null,
+      size: Array.isArray(g.participants) ? g.participants.length : 0,
+      announce: !!g.announce,
+      restrict: !!g.restrict,
+      is_admin: Array.isArray(g.participants)
+        ? g.participants.some(
+            (p) => p.id === m.sock.user?.id && ["admin", "superadmin"].includes(p.admin)
+          )
+        : false,
+    }));
+    list.sort((a, b) => a.subject.localeCompare(b.subject));
+    res.json({ ok: true, count: list.length, groups: list });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post("/sessions/:id/send-group", async (req, res) => {
   const id = req.params.id;
   const { group_id, text, url } = req.body || {};
