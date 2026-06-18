@@ -212,6 +212,15 @@ export default function Customers() {
               <DetailRow label="Webhook" value={viewing.user.webhook_url} mono break />
             )}
           </div>
+          <div className="mt-5 border border-amber-200 bg-amber-50 sharp p-3 text-xs text-amber-900 flex gap-2" data-testid="privacy-notice">
+            <span className="font-mono text-[10px] uppercase tracking-widest shrink-0">privacy</span>
+            <span>
+              Customer message contents (sent & received) are never visible from this page —
+              only aggregate counts. To read messages you must explicitly{" "}
+              <strong>Impersonate</strong>, which is recorded in the customer&apos;s login activity
+              log and the system audit log.
+            </span>
+          </div>
           <div className="mt-5 border-t border-neutral-200 pt-4 flex justify-end">
             <button
               onClick={() => impersonate(viewing.user)}

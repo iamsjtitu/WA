@@ -2,17 +2,31 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { PageHeader } from "./Overview";
 import api, { formatErr } from "../lib/api";
-import { Copy, ArrowsClockwise, LinkSimple, Trash, PaperPlaneTilt, Lock, User, Check } from "@phosphor-icons/react";
+import { Copy, ArrowsClockwise, LinkSimple, Trash, PaperPlaneTilt, Lock, User, Check, ShieldWarning } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 export default function Settings() {
   const { user, refresh } = useAuth();
   const [webhookUrl, setWebhookUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loginActivity, setLoginActivity] = useState([]);
 
   useEffect(() => {
     setWebhookUrl(user?.webhook_url || "");
   }, [user?.webhook_url]);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .get("/me/login-activity")
+      .then(({ data }) => {
+        if (active) setLoginActivity(data.events || []);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const copy = (k) => {
     navigator.clipboard.writeText(k);
@@ -213,6 +227,54 @@ export default function Settings() {
         <p className="text-sm mt-2">
           {user?.quota_used} of {user?.quota_monthly} messages used this period.
         </p>
+      </div>
+
+      <div className="mt-6 border border-neutral-200 sharp p-6" data-testid="login-activity-section">
+        <div className="flex items-center gap-2">
+          <ShieldWarning size={18} weight="fill" color="#1FA855" />
+          <h3 className="font-display font-semibold text-lg tracking-tight">Login Activity</h3>
+        </div>
+        <p className="text-sm text-neutral-600 mt-2">
+          Your message contents are private — staff cannot read them from the admin panel.
+          The only way an administrator can view your messages is by explicitly impersonating
+          your account, and every such login is recorded below.
+        </p>
+        {loginActivity.length === 0 ? (
+          <p className="mt-4 text-sm text-neutral-500 font-mono italic" data-testid="no-impersonations">
+            No administrator has ever logged in as you. ✓
+          </p>
+        ) : (
+          <div className="mt-4 border border-neutral-200 sharp overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-neutral-50 border-b border-neutral-200">
+                <tr>
+                  <th className="text-left px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-neutral-500">
+                    Admin
+                  </th>
+                  <th className="text-left px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-neutral-500">
+                    When
+                  </th>
+                  <th className="text-left px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-neutral-500">
+                    IP
+                  </th>
+                </tr>
+              </thead>
+              <tbody data-testid="login-activity-table">
+                {loginActivity.map((e, i) => (
+                  <tr key={i} className={i ? "border-t border-neutral-200" : ""}>
+                    <td className="px-3 py-2 font-mono text-xs">{e.admin_email}</td>
+                    <td className="px-3 py-2 text-xs text-neutral-600">
+                      {new Date(e.at).toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-neutral-500">
+                      {e.ip || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

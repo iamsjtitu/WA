@@ -666,6 +666,26 @@ async def admin_stats(_: dict = Depends(admin_only)):
 
 
 # ---------------- Customer Profile ----------------
+@api.get("/me/login-activity")
+async def my_login_activity(user: dict = Depends(current_user)):
+    """Return recent admin impersonation events on this account — full transparency.
+
+    Customers see WHO accessed their account, WHEN, and FROM WHICH IP. This is the
+    primary privacy control: even though admins can technically impersonate, every
+    such event is permanently logged and visible to the affected customer.
+    """
+    cursor = (
+        db.audit_logs.find(
+            {"type": "impersonation_start", "customer_id": user["id"]},
+            {"_id": 0, "admin_email": 1, "ip": 1, "user_agent": 1, "at": 1},
+        )
+        .sort("at", -1)
+        .limit(50)
+    )
+    events = await cursor.to_list(length=50)
+    return {"events": events}
+
+
 @api.post("/me/regenerate-key")
 async def regen_my_key(user: dict = Depends(current_user)):
     new_key = gen_api_key()
