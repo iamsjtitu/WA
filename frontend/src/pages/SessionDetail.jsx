@@ -14,8 +14,6 @@ import {
   Calendar,
   ArrowUp,
   X,
-  Eye,
-  EyeSlash,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
@@ -24,30 +22,7 @@ export default function SessionDetail() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [session, setSession] = useState(null);
-  const [received, setReceived] = useState([]);
-  const [sent, setSent] = useState([]);
   const [qrModal, setQrModal] = useState(null);
-
-  // Privacy: mask message body by default; persist preference per device.
-  const [maskMessages, setMaskMessages] = useState(() => {
-    if (typeof window === "undefined") return true;
-    const v = window.localStorage.getItem("wa9x.maskMessages");
-    return v === null ? true : v === "1";
-  });
-  const [revealedMsgs, setRevealedMsgs] = useState({}); // id -> true
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem("wa9x.maskMessages", maskMessages ? "1" : "0");
-    } catch (e) {
-      void e;
-    }
-    if (maskMessages) setRevealedMsgs({});
-  }, [maskMessages]);
-
-  const isRevealed = (mid) => !maskMessages || revealedMsgs[mid];
-  const toggleReveal = (mid) =>
-    setRevealedMsgs((r) => ({ ...r, [mid]: !r[mid] }));
 
   // send form
   const [to, setTo] = useState("");
@@ -59,14 +34,8 @@ export default function SessionDetail() {
 
   const refresh = useCallback(async () => {
     try {
-      const [sRes, recRes, sentRes] = await Promise.all([
-        api.get(`/sessions/${id}/status`),
-        api.get(`/sessions/${id}/messages`, { params: { direction: "inbound", limit: 20 } }),
-        api.get(`/sessions/${id}/messages`, { params: { direction: "outbound", limit: 20 } }),
-      ]);
+      const sRes = await api.get(`/sessions/${id}/status`);
       setSession(sRes.data);
-      setReceived(recRes.data);
-      setSent(sentRes.data);
     } catch (e) {
       if (e?.response?.status === 404) {
         toast.error("Session not found");
@@ -337,122 +306,26 @@ export default function SessionDetail() {
         </div>
       </div>
 
-      {/* Received / Sent / Send 3-column */}
-      <div className="mt-8 grid lg:grid-cols-3 gap-6">
-        {/* Received */}
-        <div className="border border-neutral-200 sharp">
-          <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between">
-            <h3 className="font-display font-semibold text-sm">Received Messages</h3>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setMaskMessages((v) => !v)}
-                className="p-1 hover:bg-neutral-100 sharp"
-                title={maskMessages ? "Reveal all messages" : "Mask all messages (privacy mode)"}
-                data-testid="toggle-mask-messages"
-              >
-                {maskMessages ? <EyeSlash size={14} /> : <Eye size={14} />}
-              </button>
-              <button onClick={refresh} className="p-1 hover:bg-neutral-100 sharp" data-testid="refresh-received">
-                <ArrowsClockwise size={14} />
-              </button>
-            </div>
+      {/* Send form (Received/Sent panels removed for privacy — message contents are
+          never displayed in the dashboard. Use the API to retrieve them programmatically.) */}
+      <div className="mt-8 grid lg:grid-cols-2 gap-6">
+        <div className="border border-neutral-200 sharp" data-testid="privacy-notice-panel">
+          <div className="px-4 py-3 border-b border-neutral-200">
+            <h3 className="font-display font-semibold text-sm">Message Privacy</h3>
           </div>
-          <div className="max-h-80 overflow-y-auto" data-testid="received-list">
-            {received.length === 0 ? (
-              <p className="p-4 text-sm text-neutral-500">No received messages yet.</p>
-            ) : (
-              received.map((m) => (
-                <div key={m.id} className="px-4 py-3 border-b border-neutral-100 last:border-b-0">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs text-neutral-500">
-                      {new Date(m.sent_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs">↓ {m.from}</span>
-                      {maskMessages && (
-                        <button
-                          onClick={() => toggleReveal(m.id)}
-                          className="text-neutral-400 hover:text-neutral-900 p-0.5"
-                          title={isRevealed(m.id) ? "Hide" : "Reveal this message"}
-                          data-testid={`reveal-recv-${m.id}`}
-                        >
-                          {isRevealed(m.id) ? <EyeSlash size={11} /> : <Eye size={11} />}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <p className="text-sm mt-1 truncate" data-testid={`recv-body-${m.id}`}>
-                    {m.has_media && (
-                      <span className="text-[10px] uppercase tracking-widest text-neutral-500 mr-1 border border-neutral-200 px-1">
-                        {m.type}
-                      </span>
-                    )}
-                    {isRevealed(m.id) ? (m.text || "(media)") : (
-                      <span className="font-mono text-neutral-400 select-none">
-                        •••••••• content hidden ••••••••
-                      </span>
-                    )}
-                  </p>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Sent */}
-        <div className="border border-neutral-200 sharp">
-          <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between">
-            <h3 className="font-display font-semibold text-sm">Sent Messages</h3>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setMaskMessages((v) => !v)}
-                className="p-1 hover:bg-neutral-100 sharp"
-                title={maskMessages ? "Reveal all messages" : "Mask all messages (privacy mode)"}
-                data-testid="toggle-mask-messages-sent"
-              >
-                {maskMessages ? <EyeSlash size={14} /> : <Eye size={14} />}
-              </button>
-              <button onClick={refresh} className="p-1 hover:bg-neutral-100 sharp" data-testid="refresh-sent">
-                <ArrowsClockwise size={14} />
-              </button>
-            </div>
-          </div>
-          <div className="max-h-80 overflow-y-auto" data-testid="sent-list">
-            {sent.length === 0 ? (
-              <p className="p-4 text-sm text-neutral-500">No sent messages yet.</p>
-            ) : (
-              sent.map((m) => (
-                <div key={m.id} className="px-4 py-3 border-b border-neutral-100 last:border-b-0">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs text-neutral-500">
-                      {new Date(m.sent_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className={`font-mono text-xs ${m.status === "sent" ? "" : "text-red-600"}`}>
-                        {m.status === "sent" ? "✓" : "✕"} ↑ {m.to}
-                      </span>
-                      {maskMessages && (
-                        <button
-                          onClick={() => toggleReveal(m.id)}
-                          className="text-neutral-400 hover:text-neutral-900 p-0.5"
-                          title={isRevealed(m.id) ? "Hide" : "Reveal this message"}
-                          data-testid={`reveal-sent-${m.id}`}
-                        >
-                          {isRevealed(m.id) ? <EyeSlash size={11} /> : <Eye size={11} />}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <p className="text-sm mt-1 truncate" data-testid={`sent-body-${m.id}`}>
-                    {isRevealed(m.id) ? (m.text || "(media)") : (
-                      <span className="font-mono text-neutral-400 select-none">
-                        •••••••• content hidden ••••••••
-                      </span>
-                    )}
-                  </p>
-                </div>
-              ))
-            )}
+          <div className="p-4 text-sm text-neutral-700 leading-relaxed">
+            <p>
+              For end-to-end privacy, <strong>received and sent message contents are
+              never displayed in this dashboard</strong> — for customers or administrators.
+            </p>
+            <p className="mt-3 text-neutral-600">
+              Your messages are still processed: they flow through your webhook URL
+              (configured in <Link className="text-[#1FA855] hover:underline" to="/app/settings">Settings</Link>)
+              and can be retrieved programmatically via the v2 API endpoints
+              <code className="font-mono text-xs bg-neutral-100 px-1.5 py-0.5 ml-1">/v2/message/sentMessages</code> and
+              <code className="font-mono text-xs bg-neutral-100 px-1.5 py-0.5 ml-1">/v2/message/receivedMessages</code>
+              using your service API key.
+            </p>
           </div>
         </div>
 

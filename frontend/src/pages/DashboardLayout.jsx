@@ -33,7 +33,6 @@ export default function DashboardLayout() {
     { to: "/app/sessions", label: "Services", icon: Plugs, key: "sessions" },
     { to: "/app/send", label: "Send Message", icon: PaperPlaneTilt, key: "send" },
     { to: "/app/bulk", label: "Bulk Campaign", icon: PaperPlane, key: "bulk" },
-    { to: "/app/logs", label: "Message Logs", icon: ListBullets, key: "logs" },
     { to: "/app/docs", label: "API Docs", icon: Code, key: "docs" },
     ...(isAdmin
       ? [

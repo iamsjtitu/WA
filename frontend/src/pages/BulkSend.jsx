@@ -277,8 +277,8 @@ export default function BulkSend() {
           <div className="border border-neutral-200 sharp p-6 sticky top-6">
             <h3 className="font-display font-semibold tracking-tight">Throughput</h3>
             <p className="text-sm text-neutral-600 mt-2">
-              Bulk sends are throttled at ~1 msg / 0.6s to reduce ban risk. Track progress
-              in <span className="kbd">Message Logs</span>.
+              Bulk sends are throttled at ~1 msg / 0.6s to reduce ban risk. The progress
+              counts below appear once the send completes.
             </p>
             {result && (
               <div className="mt-4 border-t border-neutral-200 pt-4 space-y-1 text-sm font-mono">
