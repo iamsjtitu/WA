@@ -169,6 +169,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
 
     async def user_from_bearer(request: Request) -> dict:
         # Accept Authorization: Bearer {api_key} OR X-API-Key OR ?token=
+        # The key may be either a user-level master key OR a session-scoped key.
         token = None
         ah = request.headers.get("Authorization", "")
         if ah.startswith("Bearer "):
@@ -179,6 +180,20 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             token = request.query_params.get("token")
         if not token:
             raise HTTPException(status_code=401, detail="Bearer token required")
+
+        # 1. Try matching a session-scoped api_key first
+        sess = await db.wa_sessions.find_one({"api_key": token}, {"_id": 0})
+        if sess:
+            user = await db.users.find_one(
+                {"id": sess["user_id"]}, {"_id": 0, "password_hash": 0}
+            )
+            if not user:
+                raise HTTPException(status_code=401, detail="Invalid API token")
+            # Pin the resolved session so _resolve_session uses it directly
+            user["_pinned_session_id"] = sess["id"]
+            return user
+
+        # 2. Fall back to the user-level master key (legacy behaviour)
         user = await db.users.find_one(
             {"api_key": token}, {"_id": 0, "password_hash": 0}
         )
@@ -186,7 +201,31 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             raise HTTPException(status_code=401, detail="Invalid API token")
         return user
 
-    async def _resolve_session(user_id: str) -> dict:
+    async def _resolve_session(user_id_or_user) -> dict:
+        # Accept either a user_id string or a full user dict (for pinned session)
+        if isinstance(user_id_or_user, dict):
+            user = user_id_or_user
+            pinned_id = user.get("_pinned_session_id")
+            if pinned_id:
+                s = await db.wa_sessions.find_one(
+                    {"id": pinned_id, "user_id": user["id"]}, {"_id": 0}
+                )
+                if s and s.get("status") == "connected":
+                    return s
+                if s:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "The session bound to this API key is not connected "
+                            f"(status={s.get('status', 'unknown')}). Re-link it from "
+                            "the dashboard."
+                        ),
+                    )
+                # Pinned session was deleted — fall through to error below
+            user_id = user["id"]
+        else:
+            user_id = user_id_or_user
+
         s = await db.wa_sessions.find_one(
             {"user_id": user_id, "status": "connected"}, {"_id": 0}
         )
@@ -220,7 +259,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
         delay: str = Form(""),
     ):
         user = await user_from_bearer(request)
-        session = await _resolve_session(user["id"])
+        session = await _resolve_session(user)
         phone = normalize_phone(phonenumber)
         phone = await _maybe_apply_country_code(session, phone)
         if not phone:
@@ -311,7 +350,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
         user = await user_from_bearer(request)
         # Validate groupId format BEFORE touching the session
         gid_digits, gid_jid = normalize_group_id(groupId)
-        session = await _resolve_session(user["id"])
+        session = await _resolve_session(user)
 
         when = parse_delay(delay) if delay else None
         if when and when > datetime.now(timezone.utc):
@@ -569,7 +608,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
     async def list_groups_v2(request: Request):
         """List all WhatsApp groups the connected session is part of."""
         user = await user_from_bearer(request)
-        session = await _resolve_session(user["id"])
+        session = await _resolve_session(user)
         try:
             result = await wa_client.list_groups(session["id"])
         except Exception as e:
@@ -641,7 +680,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
                 status_code=400, detail="Provide file OR url — not both"
             )
 
-        session = await _resolve_session(user["id"])
+        session = await _resolve_session(user)
 
         # Materialise the document onto disk so the Node service can stream it
         if file:
@@ -808,7 +847,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
                 "data": {},
             }
 
-        session = await _resolve_session(user["id"])
+        session = await _resolve_session(user)
 
         phone = normalize_phone(phonenumber)
         phone = await _maybe_apply_country_code(session, phone)
@@ -911,7 +950,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
                 "data": {},
             }
 
-        session = await _resolve_session(user["id"])
+        session = await _resolve_session(user)
 
         ext = PathLib(display_name).suffix or ""
         local = UPLOAD_DIR / f"{new_id()}{ext}"
@@ -1007,7 +1046,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
     async def group_chat_get_group_list(request: Request):
         """Drop-in compatible with 360messenger /v2/groupChat/getGroupList."""
         user = await user_from_bearer(request)
-        session = await _resolve_session(user["id"])
+        session = await _resolve_session(user)
         try:
             result = await wa_client.list_groups(session["id"])
         except Exception as e:

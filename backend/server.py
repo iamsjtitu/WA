@@ -792,6 +792,7 @@ async def create_session_endpoint(
         "auto_prefix": False,
         "receive_messages": True,
         "mark_as_seen": False,
+        "api_key": gen_api_key(),
         "created_at": now_iso(),
     }
     await db.wa_sessions.insert_one(doc)
@@ -867,6 +868,21 @@ async def get_session_status(session_id: str, user: dict = Depends(current_user)
         "pairing_code": live.get("pairing_code"),
         "pairing_phone": live.get("pairing_phone"),
     }
+
+
+@api.post("/sessions/{session_id}/regenerate-key")
+async def regen_session_key(session_id: str, user: dict = Depends(current_user)):
+    """Rotate the session-scoped API key (used to pin API calls to this session)."""
+    s = await db.wa_sessions.find_one(
+        {"id": session_id, "user_id": user["id"]}, {"_id": 0}
+    )
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    new_key = gen_api_key()
+    await db.wa_sessions.update_one(
+        {"id": session_id, "user_id": user["id"]}, {"$set": {"api_key": new_key}}
+    )
+    return {"api_key": new_key}
 
 
 @api.get("/sessions/{session_id}/groups")
@@ -1669,12 +1685,25 @@ async def on_startup():
         await db.users.create_index("email", unique=True)
         await db.users.create_index("api_key", unique=True)
         await db.wa_sessions.create_index([("user_id", 1)])
+        await db.wa_sessions.create_index("api_key", unique=True, sparse=True)
         await db.messages.create_index([("user_id", 1), ("sent_at", -1)])
         await db.scheduled_messages.create_index(
             [("status", 1), ("run_at", 1)]
         )
     except Exception:
         logger.exception("index creation failed (non-fatal)")
+
+    # One-time backfill: assign api_key to legacy sessions that don't have one
+    try:
+        async for s in db.wa_sessions.find(
+            {"$or": [{"api_key": {"$exists": False}}, {"api_key": None}, {"api_key": ""}]},
+            {"_id": 0, "id": 1},
+        ):
+            await db.wa_sessions.update_one(
+                {"id": s["id"]}, {"$set": {"api_key": gen_api_key()}}
+            )
+    except Exception:
+        logger.exception("session api_key backfill failed (non-fatal)")
 
     # spawn scheduled message dispatcher
     asyncio.create_task(_scheduled_dispatcher())

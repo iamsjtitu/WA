@@ -222,13 +222,37 @@ export default function SessionDetail() {
       {/* API Key + Connection Status row */}
       <div className="mt-6 grid lg:grid-cols-2 gap-6">
         <div className="border border-neutral-200 sharp p-6" data-testid="api-key-card">
-          <p className="font-mono text-[11px] uppercase tracking-widest text-neutral-500">api key</p>
-          <code className="block mt-2 font-mono text-sm bg-neutral-100 border border-neutral-200 sharp p-3 break-all">
-            {user?.api_key}
+          <div className="flex items-center justify-between">
+            <p className="font-mono text-[11px] uppercase tracking-widest text-neutral-500">service api key</p>
+            <span className="font-mono text-[10px] uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5">pinned to this service</span>
+          </div>
+          <code className="block mt-2 font-mono text-sm bg-neutral-100 border border-neutral-200 sharp p-3 break-all" data-testid="service-api-key-value">
+            {session?.api_key || "—"}
           </code>
-          <div className="flex gap-2 mt-3">
-            <button onClick={() => copy(user?.api_key)} className="btn-ghost text-sm inline-flex items-center gap-2" data-testid="copy-api-key">
+          <div className="flex gap-2 mt-3 flex-wrap">
+            <button
+              onClick={() => copy(session?.api_key)}
+              className="btn-ghost text-sm inline-flex items-center gap-2"
+              data-testid="copy-service-api-key"
+              disabled={!session?.api_key}
+            >
               <Copy size={14} /> Copy
+            </button>
+            <button
+              onClick={async () => {
+                if (!window.confirm("Rotate this service's API key? Existing integrations using the old key will stop working.")) return;
+                try {
+                  await api.post(`/sessions/${session.id}/regenerate-key`);
+                  await refresh();
+                  toast.success("Service API key rotated");
+                } catch (e) {
+                  toast.error(e?.response?.data?.detail || "Failed");
+                }
+              }}
+              className="btn-ghost text-sm inline-flex items-center gap-2 text-amber-700 hover:bg-amber-50"
+              data-testid="rotate-service-api-key"
+            >
+              Rotate
             </button>
             <Link
               to="/app/docs"
@@ -238,8 +262,9 @@ export default function SessionDetail() {
               View API docs
             </Link>
           </div>
-          <p className="text-xs text-neutral-500 mt-3 font-mono">
-            Use as <span className="kbd">Authorization: Bearer …</span>
+          <p className="text-xs text-neutral-500 mt-3 font-mono leading-relaxed">
+            Calls authenticated with this key are pinned to <strong>{session?.name}</strong>.
+            Your account-wide key still works but routes to whichever service is connected first.
           </p>
         </div>
 
