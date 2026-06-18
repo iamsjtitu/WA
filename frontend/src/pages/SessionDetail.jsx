@@ -14,6 +14,8 @@ import {
   Calendar,
   ArrowUp,
   X,
+  Eye,
+  EyeSlash,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
@@ -25,6 +27,27 @@ export default function SessionDetail() {
   const [received, setReceived] = useState([]);
   const [sent, setSent] = useState([]);
   const [qrModal, setQrModal] = useState(null);
+
+  // Privacy: mask message body by default; persist preference per device.
+  const [maskMessages, setMaskMessages] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const v = window.localStorage.getItem("wa9x.maskMessages");
+    return v === null ? true : v === "1";
+  });
+  const [revealedMsgs, setRevealedMsgs] = useState({}); // id -> true
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("wa9x.maskMessages", maskMessages ? "1" : "0");
+    } catch (e) {
+      void e;
+    }
+    if (maskMessages) setRevealedMsgs({});
+  }, [maskMessages]);
+
+  const isRevealed = (mid) => !maskMessages || revealedMsgs[mid];
+  const toggleReveal = (mid) =>
+    setRevealedMsgs((r) => ({ ...r, [mid]: !r[mid] }));
 
   // send form
   const [to, setTo] = useState("");
@@ -320,9 +343,19 @@ export default function SessionDetail() {
         <div className="border border-neutral-200 sharp">
           <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between">
             <h3 className="font-display font-semibold text-sm">Received Messages</h3>
-            <button onClick={refresh} className="p-1 hover:bg-neutral-100 sharp" data-testid="refresh-received">
-              <ArrowsClockwise size={14} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setMaskMessages((v) => !v)}
+                className="p-1 hover:bg-neutral-100 sharp"
+                title={maskMessages ? "Reveal all messages" : "Mask all messages (privacy mode)"}
+                data-testid="toggle-mask-messages"
+              >
+                {maskMessages ? <EyeSlash size={14} /> : <Eye size={14} />}
+              </button>
+              <button onClick={refresh} className="p-1 hover:bg-neutral-100 sharp" data-testid="refresh-received">
+                <ArrowsClockwise size={14} />
+              </button>
+            </div>
           </div>
           <div className="max-h-80 overflow-y-auto" data-testid="received-list">
             {received.length === 0 ? (
@@ -334,15 +367,31 @@ export default function SessionDetail() {
                     <span className="font-mono text-xs text-neutral-500">
                       {new Date(m.sent_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </span>
-                    <span className="font-mono text-xs">↓ {m.from}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs">↓ {m.from}</span>
+                      {maskMessages && (
+                        <button
+                          onClick={() => toggleReveal(m.id)}
+                          className="text-neutral-400 hover:text-neutral-900 p-0.5"
+                          title={isRevealed(m.id) ? "Hide" : "Reveal this message"}
+                          data-testid={`reveal-recv-${m.id}`}
+                        >
+                          {isRevealed(m.id) ? <EyeSlash size={11} /> : <Eye size={11} />}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-sm mt-1 truncate">
+                  <p className="text-sm mt-1 truncate" data-testid={`recv-body-${m.id}`}>
                     {m.has_media && (
                       <span className="text-[10px] uppercase tracking-widest text-neutral-500 mr-1 border border-neutral-200 px-1">
                         {m.type}
                       </span>
                     )}
-                    {m.text || "(media)"}
+                    {isRevealed(m.id) ? (m.text || "(media)") : (
+                      <span className="font-mono text-neutral-400 select-none">
+                        •••••••• content hidden ••••••••
+                      </span>
+                    )}
                   </p>
                 </div>
               ))
@@ -354,9 +403,19 @@ export default function SessionDetail() {
         <div className="border border-neutral-200 sharp">
           <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between">
             <h3 className="font-display font-semibold text-sm">Sent Messages</h3>
-            <button onClick={refresh} className="p-1 hover:bg-neutral-100 sharp" data-testid="refresh-sent">
-              <ArrowsClockwise size={14} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setMaskMessages((v) => !v)}
+                className="p-1 hover:bg-neutral-100 sharp"
+                title={maskMessages ? "Reveal all messages" : "Mask all messages (privacy mode)"}
+                data-testid="toggle-mask-messages-sent"
+              >
+                {maskMessages ? <EyeSlash size={14} /> : <Eye size={14} />}
+              </button>
+              <button onClick={refresh} className="p-1 hover:bg-neutral-100 sharp" data-testid="refresh-sent">
+                <ArrowsClockwise size={14} />
+              </button>
+            </div>
           </div>
           <div className="max-h-80 overflow-y-auto" data-testid="sent-list">
             {sent.length === 0 ? (
@@ -368,11 +427,29 @@ export default function SessionDetail() {
                     <span className="font-mono text-xs text-neutral-500">
                       {new Date(m.sent_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </span>
-                    <span className={`font-mono text-xs ${m.status === "sent" ? "" : "text-red-600"}`}>
-                      {m.status === "sent" ? "✓" : "✕"} ↑ {m.to}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`font-mono text-xs ${m.status === "sent" ? "" : "text-red-600"}`}>
+                        {m.status === "sent" ? "✓" : "✕"} ↑ {m.to}
+                      </span>
+                      {maskMessages && (
+                        <button
+                          onClick={() => toggleReveal(m.id)}
+                          className="text-neutral-400 hover:text-neutral-900 p-0.5"
+                          title={isRevealed(m.id) ? "Hide" : "Reveal this message"}
+                          data-testid={`reveal-sent-${m.id}`}
+                        >
+                          {isRevealed(m.id) ? <EyeSlash size={11} /> : <Eye size={11} />}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-sm mt-1 truncate">{m.text || "(media)"}</p>
+                  <p className="text-sm mt-1 truncate" data-testid={`sent-body-${m.id}`}>
+                    {isRevealed(m.id) ? (m.text || "(media)") : (
+                      <span className="font-mono text-neutral-400 select-none">
+                        •••••••• content hidden ••••••••
+                      </span>
+                    )}
+                  </p>
                 </div>
               ))
             )}
