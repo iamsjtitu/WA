@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import api from "../lib/api";
 import { PageHeader } from "./Overview";
-import { Plus, Trash, ArrowsClockwise, X } from "@phosphor-icons/react";
+import { Plus, Trash, ArrowsClockwise, X, Copy, Eye, EyeSlash } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -12,6 +12,7 @@ export default function Sessions() {
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [qrModal, setQrModal] = useState(null); // {session, qr, status, phone}
+  const [revealed, setRevealed] = useState({}); // id -> bool
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,6 +109,7 @@ export default function Sessions() {
               <th>Name</th>
               <th>Phone</th>
               <th>Status</th>
+              <th>API Key</th>
               <th>Created</th>
               <th className="text-right">Actions</th>
             </tr>
@@ -115,14 +117,14 @@ export default function Sessions() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={5} className="text-center text-neutral-500 font-mono text-xs">
+                <td colSpan={6} className="text-center text-neutral-500 font-mono text-xs">
                   Loading…
                 </td>
               </tr>
             )}
             {!loading && sessions.length === 0 && (
               <tr>
-                <td colSpan={5} className="text-center text-neutral-500 py-12">
+                <td colSpan={6} className="text-center text-neutral-500 py-12">
                   <div className="font-mono text-xs uppercase tracking-widest">no sessions yet</div>
                   <div className="text-sm mt-2">Click <span className="kbd">New session</span> to link your first WhatsApp number.</div>
                 </td>
@@ -138,6 +140,41 @@ export default function Sessions() {
                   <span className="status-pill">
                     <span className={`dot ${s.status}`} /> {s.status}
                   </span>
+                </td>
+                <td onClick={(e) => e.stopPropagation()}>
+                  {s.api_key ? (
+                    <div
+                      className="inline-flex items-center gap-1.5 font-mono text-[11px] bg-neutral-100 border border-neutral-200 sharp px-2 py-1 max-w-[260px]"
+                      data-testid={`api-key-cell-${s.id}`}
+                    >
+                      <span className="truncate" title={revealed[s.id] ? s.api_key : "Click eye to reveal"}>
+                        {revealed[s.id]
+                          ? s.api_key
+                          : `${s.api_key.slice(0, 8)}••••••••${s.api_key.slice(-4)}`}
+                      </span>
+                      <button
+                        onClick={() => setRevealed((r) => ({ ...r, [s.id]: !r[s.id] }))}
+                        className="text-neutral-500 hover:text-neutral-900 p-0.5"
+                        title={revealed[s.id] ? "Hide" : "Reveal"}
+                        data-testid={`api-key-reveal-${s.id}`}
+                      >
+                        {revealed[s.id] ? <EyeSlash size={12} /> : <Eye size={12} />}
+                      </button>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(s.api_key);
+                          toast.success("API key copied");
+                        }}
+                        className="text-neutral-500 hover:text-[#1FA855] p-0.5"
+                        title="Copy"
+                        data-testid={`api-key-copy-${s.id}`}
+                      >
+                        <Copy size={12} />
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-neutral-400 font-mono text-xs">—</span>
+                  )}
                 </td>
                 <td className="font-mono text-xs text-neutral-500">
                   {new Date(s.created_at).toLocaleString()}
