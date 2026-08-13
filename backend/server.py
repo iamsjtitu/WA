@@ -323,11 +323,47 @@ async def fire_webhook(user_id: str, payload: dict):
                 "url": url,
                 "event": payload.get("event"),
                 "error": last_error,
+                "payload": payload,  # stored so admin/customer can replay via UI
+                "attempts": len(WEBHOOK_RETRY_DELAYS) + 1,
+                "replayed_at": None,
+                "replay_status": None,
                 "at": now_iso(),
             }
         )
     except Exception:
         pass
+
+
+async def replay_webhook(user_id: str, url: str, payload: dict) -> tuple[bool, str]:
+    """One-shot webhook re-fire (bypasses retry loop). Returns (ok, error_or_status)."""
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        return False, "user not found"
+    secret = user.get("webhook_secret") or user.get("api_key", "")
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    sig = hmac_sign(secret, body)
+    headers = {
+        "Content-Type": "application/json",
+        "X-Wa9x-Signature": sig,
+        "X-Wa9x-Event": payload.get("event", "message.received"),
+        "X-Wapihub-Signature": sig,
+        "X-Wapihub-Event": payload.get("event", "message.received"),
+        "X-Wa9x-Replay": "true",
+        "User-Agent": "wa.9x.design-Webhook/1.0",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            r = await c.post(url, content=body, headers=headers)
+        if 200 <= r.status_code < 300:
+            # reset failure counter on manual replay success (customer-triggered recovery)
+            await db.users.update_one(
+                {"id": user_id},
+                {"$set": {"webhook_consecutive_failures": 0}},
+            )
+            return True, f"HTTP {r.status_code}"
+        return False, f"HTTP {r.status_code}"
+    except Exception as e:
+        return False, str(e)
 
 
 # ---------------- Auth Endpoints ----------------
@@ -1216,6 +1252,105 @@ async def test_webhook(user: dict = Depends(current_user)):
     # Fire-and-forget so the dashboard button doesn't block on retries
     asyncio.create_task(fire_webhook(user["id"], payload))
     return {"sent": True}
+
+
+# ---------------- Webhook failures (replay tool) ----------------
+@api.get("/me/webhook/failures")
+async def list_webhook_failures(
+    user: dict = Depends(current_user),
+    limit: int = Query(default=50, le=200),
+    only_pending: bool = Query(default=False),
+):
+    """Recent failed webhook deliveries for the caller. Payload is included
+    so the UI can preview what would be replayed."""
+    q: dict = {"user_id": user["id"]}
+    if only_pending:
+        q["replayed_at"] = None
+    cursor = db.webhook_failures.find(q, {"_id": 0}).sort("at", -1).limit(limit)
+    items = await cursor.to_list(length=limit)
+    total_pending = await db.webhook_failures.count_documents(
+        {"user_id": user["id"], "replayed_at": None}
+    )
+    return {"items": items, "total_pending": total_pending}
+
+
+@api.post("/me/webhook/failures/{failure_id}/replay")
+async def replay_one_webhook(failure_id: str, user: dict = Depends(current_user)):
+    """Re-fire a single failed webhook delivery."""
+    fail = await db.webhook_failures.find_one(
+        {"id": failure_id, "user_id": user["id"]}, {"_id": 0}
+    )
+    if not fail:
+        raise HTTPException(status_code=404, detail="Webhook failure not found")
+    if not fail.get("payload"):
+        raise HTTPException(
+            status_code=400,
+            detail="No payload stored (legacy record from before replay tool) — cannot replay",
+        )
+    # Refresh user's current webhook URL — use latest, not the one that failed
+    refreshed = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    url = refreshed.get("webhook_url") or fail["url"]
+    if not url:
+        raise HTTPException(status_code=400, detail="Set a webhook URL first")
+    ok, status = await replay_webhook(user["id"], url, fail["payload"])
+    await db.webhook_failures.update_one(
+        {"id": failure_id},
+        {
+            "$set": {
+                "replayed_at": now_iso(),
+                "replay_status": f"{'ok' if ok else 'failed'}: {status}",
+            }
+        },
+    )
+    return {"ok": ok, "status": status, "url": url}
+
+
+@api.post("/me/webhook/failures/replay-all")
+async def replay_all_webhooks(user: dict = Depends(current_user)):
+    """Re-fire every pending failed webhook for this user (sequential, capped)."""
+    refreshed = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    url = refreshed.get("webhook_url")
+    if not url:
+        raise HTTPException(status_code=400, detail="Set a webhook URL first")
+    cursor = (
+        db.webhook_failures.find(
+            {"user_id": user["id"], "replayed_at": None, "payload": {"$exists": True}},
+            {"_id": 0},
+        )
+        .sort("at", 1)
+        .limit(100)  # cap so we never DoS the customer's endpoint
+    )
+    pending = await cursor.to_list(length=100)
+    replayed = 0
+    failed = 0
+    for fail in pending:
+        ok, status = await replay_webhook(user["id"], url, fail["payload"])
+        await db.webhook_failures.update_one(
+            {"id": fail["id"]},
+            {
+                "$set": {
+                    "replayed_at": now_iso(),
+                    "replay_status": f"{'ok' if ok else 'failed'}: {status}",
+                }
+            },
+        )
+        if ok:
+            replayed += 1
+        else:
+            failed += 1
+        await asyncio.sleep(0.3)  # tiny throttle
+    return {"attempted": len(pending), "replayed": replayed, "failed": failed}
+
+
+@api.delete("/me/webhook/failures/{failure_id}")
+async def dismiss_webhook_failure(failure_id: str, user: dict = Depends(current_user)):
+    """Remove a failure record from the queue without replaying."""
+    r = await db.webhook_failures.delete_one(
+        {"id": failure_id, "user_id": user["id"]}
+    )
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Webhook failure not found")
+    return {"ok": True}
 
 
 # ---------------- Internal: inbound from Node service ----------------

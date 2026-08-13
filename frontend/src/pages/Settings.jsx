@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { PageHeader } from "./Overview";
 import api, { formatErr } from "../lib/api";
-import { Copy, ArrowsClockwise, LinkSimple, Trash, PaperPlaneTilt, Lock, User, Check, ShieldWarning } from "@phosphor-icons/react";
+import { Copy, ArrowsClockwise, LinkSimple, Trash, PaperPlaneTilt, Lock, User, Check, ShieldWarning, ArrowClockwise, Warning } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 export default function Settings() {
@@ -186,6 +186,8 @@ export default function Settings() {
           </div>
         )}
       </div>
+
+      <WebhookFailuresSection user={user} onChanged={refresh} />
 
       <div className="mt-6 border border-neutral-200 sharp p-6" data-testid="email-notifications-section">
         <div className="flex items-center gap-2">
@@ -434,6 +436,185 @@ function Input({ label, value, onChange, type = "text", placeholder, autoComplet
         autoComplete={autoComplete}
         className="w-full mt-1.5 border border-neutral-300 sharp px-3 py-2 text-sm outline-none focus:border-[#1FA855] focus:ring-1 focus:ring-[#1FA855]"
       />
+    </div>
+  );
+}
+
+function WebhookFailuresSection({ user, onChanged }) {
+  const [items, setItems] = useState([]);
+  const [totalPending, setTotalPending] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [replaying, setReplaying] = useState({}); // {id: bool}
+  const [replayAllBusy, setReplayAllBusy] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get("/me/webhook/failures?limit=50");
+      setItems(data.items || []);
+      setTotalPending(data.total_pending || 0);
+    } catch {
+      /* ignore */
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (user?.id) load();
+  }, [user?.id]);
+
+  const replayOne = async (id) => {
+    setReplaying((s) => ({ ...s, [id]: true }));
+    try {
+      const { data } = await api.post(`/me/webhook/failures/${id}/replay`);
+      if (data.ok) toast.success(`Replayed: ${data.status}`);
+      else toast.error(`Replay failed: ${data.status}`);
+      await load();
+      if (data.ok) await onChanged?.();
+    } catch (e) {
+      toast.error(formatErr(e?.response?.data?.detail) || "Replay failed");
+    }
+    setReplaying((s) => ({ ...s, [id]: false }));
+  };
+
+  const replayAll = async () => {
+    if (!confirm(`Replay ${totalPending} pending failed delivery/deliveries?`)) return;
+    setReplayAllBusy(true);
+    try {
+      const { data } = await api.post("/me/webhook/failures/replay-all");
+      toast.success(`Replayed ${data.replayed}/${data.attempted} · ${data.failed} still failing`);
+      await load();
+      await onChanged?.();
+    } catch (e) {
+      toast.error(formatErr(e?.response?.data?.detail) || "Replay-all failed");
+    }
+    setReplayAllBusy(false);
+  };
+
+  const dismiss = async (id) => {
+    if (!confirm("Remove this failure record?")) return;
+    try {
+      await api.delete(`/me/webhook/failures/${id}`);
+      await load();
+    } catch {
+      toast.error("Failed to dismiss");
+    }
+  };
+
+  if (!items.length && !loading) return null;
+
+  return (
+    <div
+      className="mt-6 border border-neutral-200 sharp p-6"
+      data-testid="webhook-failures-section"
+    >
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Warning size={18} weight="fill" color="#F59E0B" />
+          <h3 className="font-display font-semibold text-lg tracking-tight">
+            Failed Webhook Deliveries
+          </h3>
+          {totalPending > 0 && (
+            <span
+              className="ml-1 font-mono text-[11px] uppercase tracking-widest text-amber-700 bg-amber-100 px-2 py-0.5 sharp"
+              data-testid="failures-pending-count"
+            >
+              {totalPending} pending
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={load}
+            className="btn-ghost text-xs inline-flex items-center gap-1"
+            disabled={loading}
+            data-testid="failures-refresh"
+          >
+            <ArrowsClockwise size={12} /> Refresh
+          </button>
+          {totalPending > 0 && (
+            <button
+              onClick={replayAll}
+              disabled={replayAllBusy}
+              className="btn-brand text-xs inline-flex items-center gap-1 disabled:opacity-50"
+              data-testid="failures-replay-all"
+            >
+              <ArrowClockwise size={12} weight="bold" />
+              {replayAllBusy ? "Replaying…" : "Replay all pending"}
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="text-xs text-neutral-600 mt-2">
+        These deliveries failed after {`>3`} retry attempts. Fix your endpoint,
+        then replay individual events or all pending at once. Privacy note: only
+        the caller can view their own failures.
+      </p>
+
+      <div className="mt-4 border-t border-neutral-200 divide-y divide-neutral-200 max-h-[420px] overflow-auto">
+        {items.map((f) => (
+          <div
+            key={f.id}
+            className="py-3 flex items-start justify-between gap-3 flex-wrap"
+            data-testid={`failure-row-${f.id}`}
+          >
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-mono text-[11px] uppercase tracking-widest text-neutral-500">
+                  {f.event || "message.received"}
+                </span>
+                <span className="font-mono text-[11px] text-neutral-400">
+                  {new Date(f.at).toLocaleString()}
+                </span>
+                {f.replayed_at ? (
+                  <span
+                    className={`font-mono text-[10px] uppercase tracking-widest px-1.5 py-0.5 sharp ${
+                      f.replay_status?.startsWith("ok")
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-red-100 text-red-700"
+                    }`}
+                    data-testid={`failure-replay-status-${f.id}`}
+                  >
+                    {f.replay_status || "replayed"}
+                  </span>
+                ) : (
+                  <span className="font-mono text-[10px] uppercase tracking-widest px-1.5 py-0.5 sharp bg-amber-100 text-amber-700">
+                    pending
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-neutral-600 truncate" title={f.error}>
+                <span className="text-red-600">error:</span> {f.error || "unknown"}
+              </p>
+              <p className="mt-0.5 font-mono text-[10px] text-neutral-400 truncate" title={f.url}>
+                → {f.url}
+              </p>
+            </div>
+            <div className="flex gap-1.5 shrink-0">
+              {!f.replayed_at || f.replay_status?.startsWith("failed") ? (
+                <button
+                  onClick={() => replayOne(f.id)}
+                  disabled={!!replaying[f.id]}
+                  className="btn-ghost text-xs inline-flex items-center gap-1 disabled:opacity-50"
+                  data-testid={`failure-replay-${f.id}`}
+                  title="Re-send this webhook to your endpoint"
+                >
+                  <ArrowClockwise size={12} weight="bold" />
+                  {replaying[f.id] ? "…" : "Replay"}
+                </button>
+              ) : null}
+              <button
+                onClick={() => dismiss(f.id)}
+                className="btn-ghost text-xs inline-flex items-center gap-1 hover:!border-red-500 hover:!text-red-600"
+                data-testid={`failure-dismiss-${f.id}`}
+                title="Remove this record"
+              >
+                <Trash size={12} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
