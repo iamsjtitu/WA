@@ -40,6 +40,7 @@ from starlette.middleware.cors import CORSMiddleware
 import auth as auth_mod
 import billing as billing_mod
 import email_service
+import url_guard
 import system_admin
 import v2_compat
 import wa_client
@@ -274,6 +275,9 @@ async def fire_webhook(user_id: str, payload: dict):
     sig = hmac_sign(secret, body)
     headers = {
         "Content-Type": "application/json",
+        # Both headers sent — X-Wapihub-* kept for backward compat with older customer integrations
+        "X-Wa9x-Signature": sig,
+        "X-Wa9x-Event": payload.get("event", "message.received"),
         "X-Wapihub-Signature": sig,
         "X-Wapihub-Event": payload.get("event", "message.received"),
         "User-Agent": "wa.9x.design-Webhook/1.0",
@@ -1403,6 +1407,12 @@ async def public_send(payload: ApiSendIn, request: Request):
     user = await user_from_api_key(request)
     if not payload.text and not payload.media_url:
         raise HTTPException(status_code=400, detail="Either text or media_url is required")
+    # SSRF guard runs BEFORE session resolution (defence in depth)
+    if payload.media_url:
+        try:
+            url_guard.check_url(payload.media_url)
+        except url_guard.UnsafeURLError as e:
+            raise HTTPException(status_code=400, detail=f"Refused unsafe media_url: {e}")
     if payload.session_id:
         s = await db.wa_sessions.find_one(
             {"id": payload.session_id, "user_id": user["id"]}
@@ -1418,9 +1428,10 @@ async def public_send(payload: ApiSendIn, request: Request):
 
     if payload.media_url:
         try:
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as c:
-                r = await c.get(payload.media_url)
-                r.raise_for_status()
+            r = await url_guard.safe_get(payload.media_url, timeout=30.0)
+            r.raise_for_status()
+        except url_guard.UnsafeURLError as e:
+            raise HTTPException(status_code=400, detail=f"Refused unsafe media_url: {e}")
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to fetch media_url: {e}")
         url_path = httpx.URL(payload.media_url).path
@@ -1628,11 +1639,8 @@ async def _scheduled_dispatcher():
                     else:
                         if sched.get("url"):
                             try:
-                                async with httpx.AsyncClient(
-                                    timeout=30.0, follow_redirects=True
-                                ) as c:
-                                    r = await c.get(sched["url"])
-                                    r.raise_for_status()
+                                r = await url_guard.safe_get(sched["url"], timeout=30.0)
+                                r.raise_for_status()
                                 ext = PathLib(httpx.URL(sched["url"]).path).suffix or ""
                                 fp = UPLOAD_DIR / f"{new_id()}{ext}"
                                 fp.write_bytes(r.content)
@@ -1685,11 +1693,23 @@ async def _scheduled_dispatcher():
             logger.exception("scheduled dispatcher error")
         await asyncio.sleep(60)
 
+_cors_env = os.environ.get("CORS_ORIGINS", "").strip()
+_cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+# Refuse to combine `*` with credentials — that's a CORS Misconfiguration
+# (SEC-001). If the operator has set `*` we still allow it but drop
+# credentials mode; if the list is empty we deny cross-origin outright.
+_cors_allow_credentials = True
+if not _cors_origins:
+    _cors_origins = ["http://localhost:3000"]  # local dev only
+elif "*" in _cors_origins:
+    logger.warning("CORS_ORIGINS contains '*' — dropping credentials mode for safety")
+    _cors_allow_credentials = False
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_allow_credentials,
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"],
 )

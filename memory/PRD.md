@@ -32,6 +32,8 @@
 | 7 | — | (Save to GitHub + handoff) |
 | 8 | 18/18 + 72/72 reg | **Admin Auto-Update from GitHub**: `/api/admin/system/{status,log,update}` + `AdminSystem.jsx` page with live log tail, behind-count, defensive fetch, concurrent-update lock, fd leak fix |
 | 9 | 14/14 (backend only) | **WhatsApp session 1-3 day disconnect fix**: proper Baileys `DisconnectReason` categorisation (TERMINAL vs IMMEDIATE_RECONNECT vs backoff), exponential backoff+jitter (3s→60s), MAX 20 attempts, old-sock cleanup with 100ms drain, 4-min presence keep-alive to prevent idle drops, retry counter reset on manual `POST /sessions/:id/start`. Plus **per-service API keys**, **v2 group endpoints** (`getGroupList`, `sendMessageFile`, `sendGroupFile`), **groupId `@g.us` preservation**, **`error` field populated on all failures**, **Resend email notifications** (welcome, API-key-rotated, disconnect, reconnect, quota 90%, payment failed), **public Developer Docs** at `/developer`, **modal portal fix**, **100% message privacy** (received/sent panels + Message Logs page removed from UI). |
+| 10 | 21/21 | **Security Audit**: SEC-001 strict CORS allowlist (rejects wildcard-with-credentials), SEC-002 Stripe/Razorpay/PayPal webhook signature enforcement (503 if unsigned), SEC-003 `url_guard.py` SSRF defense (RFC1918/loopback/link-local/CGNAT/IPv6-ULA + non-http schemes + redirect-hop re-check), SEC-005 Node internal auth via `X-Internal-Secret` with `crypto.timingSafeEqual`. |
+| 11 | 23/23 | **SSRF guard reorder (defence in depth)**: `url_guard.check_url()` now fires BEFORE session resolution in `/api/v1/messages`, `/api/v2/sendMessage`, `/api/v2/sendGroup`, `/api/v2/sendDocument`. Unsafe URLs (metadata/loopback/RFC1918) are refused even with no connected session. **Brand cleanup**: webhook payload now sends `X-Wa9x-Signature` + `X-Wa9x-Event` (dual-send with legacy `X-Wapihub-*` for backward compat). ApiDocs + DeveloperDocs updated. |
 
 ### Iteration 5 — wa.9x.design Rebrand & Pairing Code (110/111 + 1 fix = 111/111)
 - ✅ Mass rebrand: WapiHub→wa.9x.design, 360messenger refs purged, color blue→green, api key prefix wapi_→wa9x_
@@ -74,7 +76,7 @@ PAYPAL_MODE=sandbox|live, PAYPAL_CLIENT_ID, PAYPAL_SECRET, PAYPAL_WEBHOOK_ID
 ```
 
 ## Backlog / Known Improvements
-- **P1**: SSRF / size-cap guards on `media_url` and `v2/sendMessage url=` server-side fetch
+- **P1**: ~~SSRF / size-cap guards on `media_url` and `v2/sendMessage url=` server-side fetch~~ ✅ SEC-003 shipped; guard now runs before session resolve (iter 11)
 - **P1**: Phone country-code heuristic (currently `len <= 11`) is fragile — replace with deterministic
 - **P1**: Bulk CSV with 500+ rows → background job (Celery/RQ)
 - **P1**: Rate limiting + brute-force lockout on `/auth/login`
@@ -83,8 +85,9 @@ PAYPAL_MODE=sandbox|live, PAYPAL_CLIENT_ID, PAYPAL_SECRET, PAYPAL_WEBHOOK_ID
 - **P2**: scheduled_messages stuck-in-`running` recovery (>5min TTL)
 - **P2**: Pair endpoint error mapping (already-registered → 409)
 - **P2**: Drop `?token=` query auth (leaks into nginx logs)
-- **P2**: server.py 1364 lines — split into routers/ subpackage
-- **P2**: PayPal webhook signature verification + Razorpay webhook secret enforcement
+- **P2**: server.py 1810 lines + v2_compat.py 1088 lines — split into routers/ subpackage
+- **P2**: ~~PayPal webhook signature verification~~ ✅ done (iter 10) & Razorpay webhook secret enforcement
+- **P2**: Ingress-level Cloudflare CORS override (backend is correct, edge injects wildcard) — infra concern
 - **P3**: Inbound media → S3 for multi-pod scale, group features, password reset, 2FA, whitelabel domains, sub-customers (reseller-of-resellers)
 
 ## Next Tasks (User)

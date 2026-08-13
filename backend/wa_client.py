@@ -7,10 +7,14 @@ from typing import Optional
 import httpx
 
 WA_SERVICE_URL = os.environ.get("WA_SERVICE_URL", "http://127.0.0.1:3001")
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 
 
 def _client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=30.0, base_url=WA_SERVICE_URL)
+    headers = {}
+    if INTERNAL_SECRET:
+        headers["X-Internal-Secret"] = INTERNAL_SECRET
+    return httpx.AsyncClient(timeout=30.0, base_url=WA_SERVICE_URL, headers=headers)
 
 
 async def start_session(session_id: str) -> dict:

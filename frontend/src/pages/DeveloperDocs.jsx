@@ -965,8 +965,11 @@ export default function DeveloperDocs() {
               HMAC Verification
             </h3>
             <p className="mt-2 text-neutral-700">
-              Each request carries an <code className="font-mono text-sm bg-neutral-100 px-1.5 py-0.5">X-Wapihub-Signature</code> header
+              Each request carries an <code className="font-mono text-sm bg-neutral-100 px-1.5 py-0.5">X-Wa9x-Signature</code> header
               of the form <code className="font-mono">sha256=&lt;hex&gt;</code>. Recompute it with your webhook secret and compare in constant time.
+              <span className="block text-xs text-neutral-500 mt-1">
+                (<code className="font-mono">X-Wapihub-Signature</code> is also sent for backward compatibility with older integrations.)
+              </span>
             </p>
             <div className="mt-3">
               <CodeTabs

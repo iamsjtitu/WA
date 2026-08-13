@@ -444,13 +444,16 @@ def make_router(db, current_user, admin_only):
             raise HTTPException(status_code=400, detail="Stripe not configured")
         _stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
         secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+        # SEC-002 defence-in-depth: refuse to trust unsigned webhooks.
+        if not secret:
+            raise HTTPException(
+                status_code=503,
+                detail="Stripe webhook not configured (STRIPE_WEBHOOK_SECRET missing).",
+            )
         body = await request.body()
         sig = request.headers.get("stripe-signature", "")
         try:
-            if secret:
-                event = _stripe.Webhook.construct_event(body, sig, secret)
-            else:
-                event = json.loads(body)
+            event = _stripe.Webhook.construct_event(body, sig, secret)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"invalid signature: {e}")
 
@@ -539,12 +542,17 @@ def make_router(db, current_user, admin_only):
     @api.post("/webhooks/razorpay")
     async def webhook_razorpay(request: Request):
         secret = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
+        # SEC-002 defence-in-depth: refuse to trust unsigned webhooks.
+        if not secret:
+            raise HTTPException(
+                status_code=503,
+                detail="Razorpay webhook not configured (RAZORPAY_WEBHOOK_SECRET missing).",
+            )
         body = await request.body()
         sig = request.headers.get("x-razorpay-signature", "")
-        if secret:
-            expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-            if not hmac.compare_digest(expected, sig):
-                raise HTTPException(status_code=400, detail="invalid signature")
+        expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            raise HTTPException(status_code=400, detail="invalid signature")
         try:
             event = json.loads(body)
         except Exception:
@@ -688,13 +696,76 @@ def make_router(db, current_user, admin_only):
 
     @api.post("/webhooks/paypal")
     async def webhook_paypal(request: Request):
-        # PayPal webhook signature verification requires PAYPAL_WEBHOOK_ID
-        # For MVP, parse body and react. In production, call /v1/notifications/verify-webhook-signature
+        # SEC-002: refuse webhooks when the operator hasn't configured a PayPal
+        # webhook ID. Without verification anyone could POST subscription
+        # events at us and receive a free upgrade.
+        webhook_id = os.environ.get("PAYPAL_WEBHOOK_ID", "").strip()
+        if not webhook_id:
+            logger.warning("PayPal webhook received but PAYPAL_WEBHOOK_ID is unset")
+            raise HTTPException(
+                status_code=503,
+                detail="PayPal webhook is not configured (PAYPAL_WEBHOOK_ID missing).",
+            )
         body = await request.body()
+        # PayPal verify-webhook-signature call
+        headers = request.headers
+        verify_payload = {
+            "auth_algo": headers.get("paypal-auth-algo", ""),
+            "cert_url": headers.get("paypal-cert-url", ""),
+            "transmission_id": headers.get("paypal-transmission-id", ""),
+            "transmission_sig": headers.get("paypal-transmission-sig", ""),
+            "transmission_time": headers.get("paypal-transmission-time", ""),
+            "webhook_id": webhook_id,
+            "webhook_event": {},
+        }
         try:
             event = json.loads(body)
         except Exception:
             raise HTTPException(status_code=400, detail="invalid json")
+        verify_payload["webhook_event"] = event
+
+        # Get PayPal OAuth access token
+        mode = os.environ.get("PAYPAL_MODE", "sandbox").lower()
+        base = (
+            "https://api-m.sandbox.paypal.com"
+            if mode != "live"
+            else "https://api-m.paypal.com"
+        )
+        cid = os.environ.get("PAYPAL_CLIENT_ID", "")
+        csec = os.environ.get("PAYPAL_SECRET", "")
+        if not cid or not csec:
+            raise HTTPException(
+                status_code=503, detail="PayPal client credentials missing"
+            )
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as c:
+                token_r = await c.post(
+                    f"{base}/v1/oauth2/token",
+                    data={"grant_type": "client_credentials"},
+                    auth=(cid, csec),
+                )
+                token_r.raise_for_status()
+                token = token_r.json()["access_token"]
+                verify_r = await c.post(
+                    f"{base}/v1/notifications/verify-webhook-signature",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=verify_payload,
+                )
+                verify_r.raise_for_status()
+                status = verify_r.json().get("verification_status", "FAILURE")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception("PayPal webhook verification failed")
+            raise HTTPException(
+                status_code=502, detail=f"Verification API error: {e}"
+            )
+        if status != "SUCCESS":
+            raise HTTPException(status_code=401, detail="PayPal signature invalid")
+
         etype = event.get("event_type")
         resource = event.get("resource") or {}
         if etype in ("BILLING.SUBSCRIPTION.ACTIVATED", "BILLING.SUBSCRIPTION.CREATED"):

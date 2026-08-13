@@ -238,7 +238,9 @@ echo curl_exec($ch);`
         <p className="text-sm text-neutral-600 mt-3 max-w-3xl">
           Set a webhook URL in <a href="/app/settings" className="text-[#1FA855] underline">Settings</a>.
           When a connected number receives a message, we'll POST a signed JSON payload to your endpoint.
-          Verify the <span className="kbd">X-Wapihub-Signature</span> header before trusting the body.
+          Verify the <span className="kbd">X-Wa9x-Signature</span> header before trusting the body.
+          <br className="hidden sm:inline" />
+          <span className="text-xs text-neutral-500">(<span className="kbd">X-Wapihub-Signature</span> is also sent for backward compatibility.)</span>
         </p>
 
         <h3 className="font-display font-semibold mt-5">Payload</h3>
@@ -246,8 +248,8 @@ echo curl_exec($ch);`
           "webhook-payload",
           `POST {your-webhook-url}
 Content-Type: application/json
-X-Wapihub-Signature: sha256=<hex-hmac>
-X-Wapihub-Event: message.received
+X-Wa9x-Signature: sha256=<hex-hmac>
+X-Wa9x-Event: message.received
 
 {
   "event": "message.received",
@@ -267,7 +269,7 @@ X-Wapihub-Event: message.received
           `import crypto from "node:crypto";
 
 app.post("/whatsapp/webhook", express.json(), (req, res) => {
-  const sig = req.header("X-Wapihub-Signature") || "";
+  const sig = req.header("X-Wa9x-Signature") || "";
   const expected =
     "sha256=" +
     crypto

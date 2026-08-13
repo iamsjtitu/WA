@@ -16,6 +16,8 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFile, File
 
+import url_guard
+
 logger = logging.getLogger("wa9x.v2")
 UPLOAD_DIR = PathLib("/app/wa-service/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -259,6 +261,12 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
         delay: str = Form(""),
     ):
         user = await user_from_bearer(request)
+        # SSRF guard runs BEFORE session resolution (defence in depth)
+        if url:
+            try:
+                url_guard.check_url(url)
+            except url_guard.UnsafeURLError as e:
+                raise HTTPException(status_code=400, detail=f"Refused unsafe url: {e}")
         session = await _resolve_session(user)
         phone = normalize_phone(phonenumber)
         phone = await _maybe_apply_country_code(session, phone)
@@ -298,9 +306,10 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
         await enforce_quota(user, 1)
         if url:
             try:
-                async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as c:
-                    r = await c.get(url)
-                    r.raise_for_status()
+                r = await url_guard.safe_get(url, timeout=30.0)
+                r.raise_for_status()
+            except url_guard.UnsafeURLError as e:
+                raise HTTPException(status_code=400, detail=f"Refused unsafe url: {e}")
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Failed to fetch url: {e}")
             url_path = httpx.URL(url).path
@@ -350,6 +359,12 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
         user = await user_from_bearer(request)
         # Validate groupId format BEFORE touching the session
         gid_digits, gid_jid = normalize_group_id(groupId)
+        # SSRF guard runs BEFORE session resolution (defence in depth)
+        if url:
+            try:
+                url_guard.check_url(url)
+            except url_guard.UnsafeURLError as e:
+                raise HTTPException(status_code=400, detail=f"Refused unsafe url: {e}")
         session = await _resolve_session(user)
 
         when = parse_delay(delay) if delay else None
@@ -680,6 +695,13 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
                 status_code=400, detail="Provide file OR url — not both"
             )
 
+        # SSRF guard runs BEFORE session resolution (defence in depth)
+        if url:
+            try:
+                url_guard.check_url(url)
+            except url_guard.UnsafeURLError as e:
+                raise HTTPException(status_code=400, detail=f"Refused unsafe url: {e}")
+
         session = await _resolve_session(user)
 
         # Materialise the document onto disk so the Node service can stream it
@@ -692,9 +714,10 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             display_name = file_name or file.filename or local.name
         else:
             try:
-                async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as c:
-                    r = await c.get(url)
-                    r.raise_for_status()
+                r = await url_guard.safe_get(url, timeout=60.0)
+                r.raise_for_status()
+            except url_guard.UnsafeURLError as e:
+                raise HTTPException(status_code=400, detail=f"Refused unsafe url: {e}")
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Failed to fetch url: {e}")
             mime = (

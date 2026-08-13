@@ -5,6 +5,7 @@ import pino from "pino";
 import { Boom } from "@hapi/boom";
 import path from "path";
 import fs from "fs";
+import crypto from "node:crypto";
 import { fileURLToPath } from "url";
 import * as baileysPkg from "@whiskeysockets/baileys";
 
@@ -356,6 +357,27 @@ function jidFromPhone(phone) {
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "5mb" }));
+
+// SEC-005: gate every /sessions endpoint behind INTERNAL_SECRET so that if the
+// Node port ever leaks past the firewall, attackers cannot drive WhatsApp
+// sessions. /health stays public for liveness probes.
+app.use((req, res, next) => {
+  if (req.path === "/health") return next();
+  if (!INTERNAL_SECRET) {
+    // Refuse to serve if the operator forgot to set the secret.
+    return res
+      .status(503)
+      .json({ error: "wa-service INTERNAL_SECRET is not configured" });
+  }
+  const provided = req.headers["x-internal-secret"] || "";
+  if (
+    provided.length !== INTERNAL_SECRET.length ||
+    !crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(INTERNAL_SECRET))
+  ) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  return next();
+});
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
