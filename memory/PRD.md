@@ -31,6 +31,7 @@
 | 6 | — | Customer impersonation flow + admin credential change + Made-with-Emergent badge removal + VPS setup script |
 | 7 | — | (Save to GitHub + handoff) |
 | 8 | 18/18 + 72/72 reg | **Admin Auto-Update from GitHub**: `/api/admin/system/{status,log,update}` + `AdminSystem.jsx` page with live log tail, behind-count, defensive fetch, concurrent-update lock, fd leak fix |
+| 9 | 14/14 (backend only) | **WhatsApp session 1-3 day disconnect fix**: proper Baileys `DisconnectReason` categorisation (TERMINAL vs IMMEDIATE_RECONNECT vs backoff), exponential backoff+jitter (3s→60s), MAX 20 attempts, old-sock cleanup with 100ms drain, 4-min presence keep-alive to prevent idle drops, retry counter reset on manual `POST /sessions/:id/start`. Plus **per-service API keys**, **v2 group endpoints** (`getGroupList`, `sendMessageFile`, `sendGroupFile`), **groupId `@g.us` preservation**, **`error` field populated on all failures**, **Resend email notifications** (welcome, API-key-rotated, disconnect, reconnect, quota 90%, payment failed), **public Developer Docs** at `/developer`, **modal portal fix**, **100% message privacy** (received/sent panels + Message Logs page removed from UI). |
 
 ### Iteration 5 — wa.9x.design Rebrand & Pairing Code (110/111 + 1 fix = 111/111)
 - ✅ Mass rebrand: WapiHub→wa.9x.design, 360messenger refs purged, color blue→green, api key prefix wapi_→wa9x_

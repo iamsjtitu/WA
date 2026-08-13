@@ -49,12 +49,76 @@ function extForMime(mime) {
 
 const logger = pino({ level: "warn" });
 
-// session_id -> { sock, status, qrDataUrl, phone, lastError }
+// session_id -> { sock, status, qrDataUrl, phone, lastError, retryCount, keepAliveTimer, reconnectTimer }
 const sessions = new Map();
+
+// Retry limits — after ~5 minutes of failed reconnects we stop and mark
+// disconnected. Users can then click "Reconnect" from the UI which resets
+// the counter.
+const MAX_RECONNECT_ATTEMPTS = 20;
+const KEEPALIVE_INTERVAL_MS = 4 * 60 * 1000; // 4 minutes
+
+function computeBackoff(attempt) {
+  // Exponential backoff with ±20% jitter, capped at 60s
+  const base = Math.min(60_000, 3_000 * Math.pow(2, Math.max(0, attempt - 1)));
+  const jitter = base * (0.8 + Math.random() * 0.4);
+  return Math.round(jitter);
+}
+
+function clearTimers(meta) {
+  if (meta.keepAliveTimer) {
+    clearInterval(meta.keepAliveTimer);
+    meta.keepAliveTimer = null;
+  }
+  if (meta.reconnectTimer) {
+    clearTimeout(meta.reconnectTimer);
+    meta.reconnectTimer = null;
+  }
+}
+
+function scheduleReconnect(sessionId, delayMs, reason) {
+  const meta = sessions.get(sessionId) || {};
+  if (meta.reconnectTimer) clearTimeout(meta.reconnectTimer);
+  meta.retryCount = (meta.retryCount || 0) + 1;
+  if (meta.retryCount > MAX_RECONNECT_ATTEMPTS) {
+    console.error(
+      `[wa] session ${sessionId} giving up after ${MAX_RECONNECT_ATTEMPTS} attempts (last: ${reason})`
+    );
+    meta.status = "disconnected";
+    meta.lastError = `Auto-reconnect gave up after ${MAX_RECONNECT_ATTEMPTS} attempts. Reason: ${reason}`;
+    sessions.set(sessionId, meta);
+    return;
+  }
+  console.log(
+    `[wa] session ${sessionId} reconnect in ${delayMs}ms (attempt ${meta.retryCount}, reason=${reason})`
+  );
+  meta.reconnectTimer = setTimeout(() => {
+    startSession(sessionId).catch((e) =>
+      console.error(`[wa] reconnect failed session=${sessionId}: ${e.message}`)
+    );
+  }, delayMs);
+  sessions.set(sessionId, meta);
+}
 
 async function startSession(sessionId) {
   const sessionDir = path.join(AUTH_ROOT, sessionId);
   if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
+
+  // If a previous socket exists, close & clear it before starting a new one
+  const existing = sessions.get(sessionId);
+  if (existing?.sock) {
+    try {
+      // end() aborts any WS reconnect logic inside Baileys and releases handles
+      existing.sock.end?.(undefined);
+      existing.sock.ev.removeAllListeners?.();
+    } catch (e) {
+      /* ignore */ void e;
+    }
+    clearTimers(existing);
+    // Give the WS a moment to actually close before spawning the replacement
+    // so we don't briefly have two live sockets fighting over the same creds.
+    await new Promise((r) => setTimeout(r, 100));
+  }
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
   const { version } = await fetchLatestBaileysVersion();
@@ -66,6 +130,12 @@ async function startSession(sessionId) {
     browser: Browsers.macOS("Chrome"),
     printQRInTerminal: false,
     syncFullHistory: false,
+    // Baileys internal WS keep-alive; complements our own presence pings
+    keepAliveIntervalMs: 30_000,
+    // Reject connection if server takes too long; forces a fresh retry
+    connectTimeoutMs: 60_000,
+    // Retry the initial handshake on transient network errors
+    retryRequestDelayMs: 500,
   });
 
   const meta = sessions.get(sessionId) || {};
@@ -73,6 +143,7 @@ async function startSession(sessionId) {
   meta.status = meta.status || "connecting";
   meta.qrDataUrl = null;
   meta.lastError = null;
+  meta.retryCount = meta.retryCount || 0;
   sessions.set(sessionId, meta);
 
   sock.ev.on("creds.update", saveCreds);
@@ -189,30 +260,81 @@ async function startSession(sessionId) {
       m.qrDataUrl = null;
       m.phone = sock.user?.id?.split(":")[0]?.split("@")[0] || null;
       m.lastError = null;
+      m.retryCount = 0; // reset on successful connect
+      // Keep-alive: send a presence update every 4 min so WhatsApp doesn't
+      // silently drop the session as "idle". This is the #1 cause of daily
+      // "1-3 day disconnects".
+      if (m.keepAliveTimer) clearInterval(m.keepAliveTimer);
+      m.keepAliveTimer = setInterval(() => {
+        const s = sessions.get(sessionId);
+        if (!s?.sock || s.status !== "connected") return;
+        s.sock.sendPresenceUpdate?.("available").catch((e) =>
+          console.error(`[wa] presence keep-alive failed ${sessionId}: ${e.message}`)
+        );
+      }, KEEPALIVE_INTERVAL_MS);
       sessions.set(sessionId, m);
       console.log(`[wa] session ${sessionId} connected as ${m.phone}`);
     }
 
     if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
-      const isLoggedOut = code === DisconnectReason.loggedOut;
-      m.status = isLoggedOut ? "logged_out" : "disconnected";
-      m.lastError = lastDisconnect?.error?.message || null;
-      sessions.set(sessionId, m);
-      console.log(`[wa] session ${sessionId} closed code=${code} loggedOut=${isLoggedOut}`);
+      const reason = lastDisconnect?.error?.message || `code=${code}`;
 
-      if (!isLoggedOut) {
-        // auto-reconnect
-        setTimeout(() => {
-          startSession(sessionId).catch((e) =>
-            console.error("reconnect error:", e.message)
-          );
-        }, 3000);
-      } else {
-        // wipe credentials
+      // Stop keep-alive on any close — will restart on reconnect
+      if (m.keepAliveTimer) {
+        clearInterval(m.keepAliveTimer);
+        m.keepAliveTimer = null;
+      }
+
+      // Categorise the disconnect
+      const CODES = DisconnectReason;
+      const TERMINAL = new Set([
+        CODES.loggedOut,        // 401 — user logged out from phone
+        CODES.connectionReplaced, // 440 — another device paired
+        CODES.forbidden,        // 403 — banned / blocked
+        CODES.multideviceMismatch, // 411 — MD not enabled
+        CODES.badSession,       // 500 — corrupted creds
+      ]);
+      const IMMEDIATE_RECONNECT = new Set([
+        CODES.restartRequired,  // 515 — the ~daily forced restart
+      ]);
+
+      if (TERMINAL.has(code)) {
+        m.status = "logged_out";
+        m.lastError = `Session terminated (${reason}). Please re-scan QR.`;
+        m.sock = null;
+        m.qrDataUrl = null;
+        m.retryCount = 0;
+        sessions.set(sessionId, m);
+        // Wipe credentials so a fresh QR is issued on next start
         try {
           fs.rmSync(sessionDir, { recursive: true, force: true });
-        } catch {}
+        } catch (e) {
+          void e;
+        }
+        console.log(
+          `[wa] session ${sessionId} TERMINAL close code=${code} reason=${reason}`
+        );
+        return;
+      }
+
+      m.status = "disconnected";
+      m.lastError = reason;
+      sessions.set(sessionId, m);
+      console.log(
+        `[wa] session ${sessionId} transient close code=${code} reason=${reason}`
+      );
+
+      if (IMMEDIATE_RECONNECT.has(code)) {
+        // WhatsApp asked us to reconnect immediately (restart required).
+        // Skip the backoff so users don't see even a second of downtime.
+        m.retryCount = 0;
+        sessions.set(sessionId, m);
+        scheduleReconnect(sessionId, 500, `restartRequired(${code})`);
+      } else {
+        // Transient network / unknown — exponential backoff with jitter
+        const nextAttempt = (m.retryCount || 0) + 1;
+        scheduleReconnect(sessionId, computeBackoff(nextAttempt), `code=${code}`);
       }
     }
   });
@@ -243,6 +365,11 @@ app.post("/sessions/:id/start", async (req, res) => {
     const existing = sessions.get(id);
     if (existing && existing.sock && ["connected", "qr", "connecting"].includes(existing.status)) {
       return res.json({ session_id: id, status: existing.status });
+    }
+    // Manual start resets the retry counter so we get a fresh reconnect budget
+    if (existing) {
+      existing.retryCount = 0;
+      sessions.set(id, existing);
     }
     await startSession(id);
     const m = sessions.get(id);

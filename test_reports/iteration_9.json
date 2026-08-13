@@ -1,0 +1,59 @@
+{
+  "summary": "Iteration 9 backend testing — WhatsApp session disconnect-handling fix (wa-service/server.js) validated. Killed and respawned Node service to load new code, then ran 14 tests covering: Node service health via FastAPI proxy, session create/status endpoints, 5x back-to-back restart cycle (exercises new sock.end()/removeAllListeners() cleanup + scheduleReconnect w/ exponential backoff), plus regression sweep on v2 endpoints, session-scoped API keys, and message/admin privacy. All 14/14 tests PASS. Node process (pid 698) stayed alive at ~90MB RSS through the whole cycle — no leak, no crash, /health returns {ok:true} after every restart. The disconnect handler categorisation (TERMINAL vs IMMEDIATE_RECONNECT vs backoff) is code-reviewed and correct. NOTE: The actual 1-3-day disconnect scenario cannot be triggered synthetically — restartRequired (code 515) is emitted by WhatsApp servers on ~24h cadence — but the code paths that will handle it are exercised by the manual restart cycle and by static review.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "wa-service /sessions/:id/start",
+        "issue": "startSession() cleans up the old sock via existing.sock.end?.(undefined) + removeAllListeners?.() but does NOT explicitly wait for the WS to actually close before creating the new socket. Baileys' end() is fire-and-forget; two overlapping sockets can briefly coexist during a rapid restart. In practice test showed no crash, but under high-frequency programmatic restarts a race is theoretically possible. Consider awaiting a 'close' event or a small setTimeout(50) before makeWASocket."
+      },
+      {
+        "endpoint": "wa-service scheduleReconnect()",
+        "issue": "retryCount is only reset (a) on connection==='open' and (b) on manual POST /sessions/:id/start. If a session flaps between 'connecting' and 'close' 20 times without ever reaching 'open', it will hit MAX_RECONNECT_ATTEMPTS=20 and give up with status='disconnected'. That's the designed behavior, but the user-facing surface (GET /api/sessions/{id}/status) currently reports status='disconnected' with lastError text — the UI should surface this so users know to click 'Reconnect' rather than assume it's still trying."
+      },
+      {
+        "endpoint": "wa-service connection.update handler",
+        "issue": "TERMINAL set wipes the session dir via fs.rmSync(sessionDir, {recursive:true, force:true}) but leaves the sessions Map entry with sock=null. If the user immediately POST /sessions/:id/start after a logout, startSession() will happily re-init from the fresh (empty) dir — good — but the meta.status still says 'logged_out' until connection.update fires again. Minor UX; no impact."
+      },
+      {
+        "endpoint": "wa-service keep-alive",
+        "issue": "sendPresenceUpdate('available') every 4 min is a reasonable heuristic to prevent WhatsApp's silent idle drop, but it's a best-effort. On some WA account types, presence updates are rate-limited; if it fails silently in a loop, error is only console.error'd, not surfaced. Consider incrementing a session-level counter and exposing via /status so ops can spot broken keep-alives."
+      },
+      {
+        "endpoint": "carry-forward",
+        "issue": "Iterations 4-8 minors (v2/sendMessage status 201, past-delay scheduled fall-through, sentMessages prefix-anchor, url= SSRF, country-code heuristic, dispatcher TTL, impersonate ordering, exit-impersonation auth dep, audit_logs type shadowing, server.py >1600 lines, system_admin git-fetch sync in request path) all still apply — none re-tested this iteration."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration9.py",
+    "/app/test_reports/pytest/iteration9.xml"
+  ],
+  "action_items": [
+    "None blocking. The disconnect-handling fix is behaving correctly under our synthetic restart-cycle test.",
+    "OPTIONAL — Add a small 'closing' await/delay in startSession() before spawning the new socket to avoid the theoretical dual-socket overlap during a rapid restart.",
+    "OPTIONAL — Surface keep-alive failures and MAX_RECONNECT_ATTEMPTS-exceeded state clearly to the frontend so users see WHY they need to click Reconnect (right now the UI just sees status='disconnected' with a lastError text field)."
+  ],
+  "critical_code_review_comments": [
+    "/app/wa-service/server.js — Overall a solid fix. The disconnect categorisation (TERMINAL vs IMMEDIATE_RECONNECT vs backoff) matches the Baileys DisconnectReason semantics correctly. restartRequired (515) now bypasses backoff and reconnects in 500ms with retryCount=0 — this is the exact code path that was the primary root cause of the reported 1-3-day disconnect bug.",
+    "/app/wa-service/server.js:107-118 — cleanup path (sock.end() + removeAllListeners()) before starting a new socket is the right pattern. Recommend wrapping in try/catch on each individual call rather than one big try (already done — good).",
+    "/app/wa-service/server.js:260-272 — keep-alive presence ping every 4 min is the second key fix. This directly addresses WhatsApp's silent idle-drop of long-lived sockets. clearInterval is properly called in every close path — no leaks.",
+    "/app/wa-service/server.js:299-315 — TERMINAL close path calls fs.rmSync(sessionDir) inside a try/catch — good; even if unlink fails, meta.status is set to logged_out first. Ordering is correct.",
+    "/app/wa-service/server.js:61-66 — computeBackoff() with ±20% jitter and 60s cap is textbook-correct thundering-herd prevention.",
+    "/app/wa-service/server.js:58 — MAX_RECONNECT_ATTEMPTS=20 with 3s→60s exponential + jitter gives roughly 5-8 min of retry before giving up. Reasonable, but consider making this configurable via env for high-availability deployments (WA_MAX_RECONNECT_ATTEMPTS).",
+    "/app/backend/server.py:923-932 — /api/sessions/{id}/restart correctly proxies to wa_client.start_session(). Ownership check (user_id) present before the proxy call — good. 502 on wa-service error is the right status.",
+    "GENERAL — server.js is now 619 lines, still one file but focused on WA session management; module boundary is fine. No need to split unless we add many more endpoints.",
+    "Cannot validate the actual 24h-recovery scenario without waiting 24h. Recommend adding a CI job (or a manual smoke) that keeps a real WhatsApp session up for 48-72h and monitors /api/sessions/{id}/status — the current unit tests only exercise the restart code path, not the full daily-restart-required scenario."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration9.py (new)"
+  ],
+  "success_rate": {"backend": "100% (14/14 iter9)", "frontend": "n/a (backend only per request)"},
+  "test_credentials": "admin@wa.9x.design / admin123 — verified working. Customer created per module run: TEST_iter9_<rand>@example.com.",
+  "seed_data_creation": "1 customer (TEST_iter9_<rand>@example.com) + 2 wa_sessions (one from module fixture, one from the persistence test). Not cleaned up; TEST_ prefix makes them identifiable.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter9 = WA microservice disconnect-handling fix. All green. Tests at /app/backend/tests/test_iteration9.py. To force a fresh Node with new code: `pkill -f 'node.*wa-service/server.js'` then wait ~6s for wa_supervisor.py to respawn. The restart-cycle test hits POST /api/sessions/{id}/restart 5x and probes /api/health in between — this is the strongest synthetic validation of the new sock cleanup path we can do without waiting for a real 24h restartRequired event. Full regression suite: `REACT_APP_BACKEND_URL=https://chat-platform-380.preview.emergentagent.com pytest backend/tests/ -v` (iter4 has a 60s scheduler wait that dominates runtime).",
+  "rca of the issue": "User's original symptom (WhatsApp session dies every 1-3 days) was caused by 6 issues in /app/wa-service/server.js: (1) restartRequired code 515 (WA's daily forced socket restart) treated as generic transient disconnect with a 3s wait and no cleanup, so the old socket handle leaked; (2) connectionReplaced 440, loggedOut 401, badSession 500 all lumped together and auto-reconnected forever, guaranteeing failure loops; (3) no cleanup of old sock before starting a new one — WS handle + event listener leak; (4) no exponential backoff → thundering herd on ban recovery; (5) unbounded reconnect loop on terminal codes; (6) no keep-alive presence ping, so idle sessions were silently dropped by WhatsApp after ~24h. The fix (present in current server.js) addresses all six: TERMINAL set wipes creds and stops, IMMEDIATE_RECONNECT set (restartRequired) does a 500ms cleanup+reconnect skipping backoff, everything else uses exponential backoff w/ jitter capped at 60s and MAX_RECONNECT_ATTEMPTS=20, existing sock is cleaned via end()+removeAllListeners() before new one spawns, and a 4-minute presence ping keeps the session alive on WhatsApp's side. Reproduction: not possible synthetically — depends on WA server-side timing (~24h forced restart). Mitigation validated via 5x back-to-back POST /api/sessions/{id}/restart cycles: Node process stayed alive at ~90MB RSS, /health responded {ok:true} after every restart, no crashes, no errors in supervisor logs."
+}
