@@ -30,7 +30,17 @@ function Protected() {
         Loading…
       </div>
     );
-  if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
+  if (!user) {
+    // Send unauth visitors to the public docs when they land on the app-side
+    // docs URL (some customers / integration tools cite `/app/docs` directly).
+    if (
+      location.pathname === "/app/docs" ||
+      location.pathname === "/app/docs/"
+    ) {
+      return <Navigate to="/docs" replace />;
+    }
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
   return <Outlet />;
 }
 
