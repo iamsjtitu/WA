@@ -302,7 +302,32 @@ export default function SessionDetail() {
             <p className="font-mono text-xs text-neutral-600 mt-1">
               WhatsApp · {session.phone || "—"}
             </p>
+            {!isConnected && (session.error_label || session.last_disconnect_label) && (
+              <div className="mt-3 pt-3 border-t border-yellow-300" data-testid="disconnect-reason">
+                <p className="font-mono text-[10px] uppercase tracking-widest text-yellow-900">
+                  why did this drop?
+                </p>
+                <p className="text-sm text-yellow-900 mt-1">
+                  {session.error_label || session.last_disconnect_label}
+                  {session.error_code || session.last_disconnect_code
+                    ? (
+                      <span className="font-mono text-[10px] text-yellow-700 ml-2">
+                        (code {session.error_code || session.last_disconnect_code})
+                      </span>
+                    ) : null}
+                </p>
+                {session.last_disconnect_at && (
+                  <p className="font-mono text-[10px] text-yellow-700 mt-1">
+                    at {new Date(session.last_disconnect_at).toLocaleString()}
+                  </p>
+                )}
+                <p className="text-xs text-yellow-800 mt-2">
+                  {reasonHint(session.error_code || session.last_disconnect_code)}
+                </p>
+              </div>
+            )}
           </div>
+          <DisconnectHistory sessionId={id} />
         </div>
       </div>
 
@@ -609,6 +634,98 @@ function Toggle({ label, hint, checked, onChange, testId }) {
           }`}
         />
       </button>
+    </div>
+  );
+}
+
+
+// Human-readable "what to do" hint per Baileys disconnect code.
+function reasonHint(code) {
+  switch (Number(code)) {
+    case 401:
+      return "You (or someone) tapped 'Log out' on the phone's Linked Devices screen. Re-scan the QR to reconnect.";
+    case 403:
+      return "WhatsApp has blocked this number — usually due to spam reports. Contact WhatsApp support before retrying.";
+    case 440:
+      return "Another device linked to this number (max 4 linked devices allowed). Unlink an unused device on your phone, then re-scan.";
+    case 408:
+    case 428:
+      return "Network hiccup — auto-reconnecting. If it doesn't recover within 5 minutes, hit Restart.";
+    case 500:
+      return "Auth files got corrupted. Click Restart to wipe and re-scan.";
+    case 515:
+      return "WhatsApp asked for a restart — normal, we're reconnecting automatically.";
+    default:
+      if (!code) return "The service dropped without a specific code. Try Restart; if it repeats within an hour, contact support.";
+      return "Try Restart. If it repeats, screenshot this and share with support.";
+  }
+}
+
+function DisconnectHistory({ sessionId }) {
+  const [items, setItems] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  const load = async () => {
+    try {
+      const { data } = await api.get(`/sessions/${sessionId}/disconnect-history?limit=20`);
+      setItems(data.items || []);
+      setLoaded(true);
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => {
+    if (open && !loaded) load();
+  }, [open]);
+
+  return (
+    <div className="mt-4" data-testid="disconnect-history">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="text-xs text-neutral-500 hover:text-neutral-800 inline-flex items-center gap-1"
+        data-testid="toggle-disconnect-history"
+      >
+        {open ? "▾" : "▸"} Disconnect history
+      </button>
+      {open && (
+        <div className="mt-2 border border-neutral-200 sharp divide-y divide-neutral-200 max-h-64 overflow-auto">
+          {!loaded ? (
+            <div className="p-3 text-xs text-neutral-500 font-mono">Loading…</div>
+          ) : items.length === 0 ? (
+            <div className="p-3 text-xs text-neutral-500 font-mono">
+              No disconnects recorded. 
+            </div>
+          ) : (
+            items.map((e) => (
+              <div key={e.id} className="p-3 flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className={`font-mono text-[10px] uppercase tracking-widest px-1.5 py-0.5 sharp ${
+                        e.terminal
+                          ? "bg-red-100 text-red-700"
+                          : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
+                      {e.terminal ? "terminal" : "transient"}
+                    </span>
+                    <span className="font-mono text-[10px] text-neutral-400">
+                      {new Date(e.at).toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="text-sm text-neutral-800 mt-1">{e.label}</p>
+                  {e.code ? (
+                    <p className="font-mono text-[10px] text-neutral-500 mt-0.5">
+                      code {e.code}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }

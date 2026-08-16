@@ -115,13 +115,19 @@ def _wrap(title: str, body_html: str, cta_url: str, cta_label: str) -> str:
 
 
 # ---------------- High-level templates ----------------
-async def notify_disconnect(user: dict, session_name: str = "Your service") -> bool:
+async def notify_disconnect(
+    user: dict, session_name: str = "Your service", reason: str | None = None
+) -> bool:
     if not user or not user.get("email_notifications", True):
         return False
     name = user.get("name") or "there"
+    reason_block = (
+        f"<p><strong>Reason:</strong> {reason}</p>" if reason else ""
+    )
     body = f"""
 <p>Dear {name},</p>
 <p><strong>{session_name}</strong> has been disconnected from WhatsApp.</p>
+{reason_block}
 <p>This problem will cause your messages not to be sent. Please go to your user
 panel and re-link this service to WhatsApp to resume sending.</p>
 """

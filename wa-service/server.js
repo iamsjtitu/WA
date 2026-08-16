@@ -50,8 +50,60 @@ function extForMime(mime) {
 
 const logger = pino({ level: "warn" });
 
-// session_id -> { sock, status, qrDataUrl, phone, lastError, retryCount, keepAliveTimer, reconnectTimer }
+// session_id -> { sock, status, qrDataUrl, phone, lastError, lastErrorCode, lastErrorReason, lastDisconnectAt, retryCount, keepAliveTimer, reconnectTimer }
 const sessions = new Map();
+
+// Human-friendly labels for Baileys disconnect codes so customers understand
+// WHY their session dropped without having to Google the code.
+const DISCONNECT_LABELS = {
+  400: "Bad request (protocol mismatch)",
+  401: "Logged out from phone (unlinked)",
+  403: "Forbidden / banned by WhatsApp",
+  405: "Method not allowed",
+  408: "Timed out",
+  411: "Multi-device not enabled",
+  428: "Connection closed by WhatsApp",
+  440: "Replaced by another device (someone else linked to this number)",
+  500: "Bad session file (auth corrupted)",
+  503: "WhatsApp service unavailable",
+  515: "Restart required (auto-reconnecting)",
+};
+
+function labelForCode(code) {
+  if (!code) return "Unknown";
+  return DISCONNECT_LABELS[code] || `Disconnect code ${code}`;
+}
+
+// Notify FastAPI when a disconnect happens so it can persist the reason for
+// the customer to see. Fire-and-forget — never block the WA loop.
+async function notifyDisconnect(sessionId, code, reason, terminal) {
+  try {
+    const fastapi = process.env.FASTAPI_URL || "http://127.0.0.1:8001";
+    const secret = process.env.INTERNAL_SECRET || "";
+    const body = JSON.stringify({
+      session_id: sessionId,
+      code: code || null,
+      reason: reason || null,
+      label: labelForCode(code),
+      terminal: !!terminal,
+      at: new Date().toISOString(),
+    });
+    // Node 18+ has global fetch; use AbortController for a short timeout.
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 3000);
+    await fetch(`${fastapi}/api/internal/disconnect-event`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Secret": secret,
+      },
+      body,
+      signal: ctrl.signal,
+    }).finally(() => clearTimeout(t));
+  } catch (e) {
+    console.error(`[wa] notifyDisconnect failed session=${sessionId}: ${e.message}`);
+  }
+}
 
 // Retry limits — after ~5 minutes of failed reconnects we stop and mark
 // disconnected. Users can then click "Reconnect" from the UI which resets
@@ -303,6 +355,10 @@ async function startSession(sessionId) {
       if (TERMINAL.has(code)) {
         m.status = "logged_out";
         m.lastError = `Session terminated (${reason}). Please re-scan QR.`;
+        m.lastErrorCode = code || null;
+        m.lastErrorReason = reason;
+        m.lastErrorLabel = labelForCode(code);
+        m.lastDisconnectAt = new Date().toISOString();
         m.sock = null;
         m.qrDataUrl = null;
         m.retryCount = 0;
@@ -314,17 +370,23 @@ async function startSession(sessionId) {
           void e;
         }
         console.log(
-          `[wa] session ${sessionId} TERMINAL close code=${code} reason=${reason}`
+          `[wa] session ${sessionId} TERMINAL close code=${code} reason=${reason} label="${labelForCode(code)}"`
         );
+        notifyDisconnect(sessionId, code, reason, true);
         return;
       }
 
       m.status = "disconnected";
       m.lastError = reason;
+      m.lastErrorCode = code || null;
+      m.lastErrorReason = reason;
+      m.lastErrorLabel = labelForCode(code);
+      m.lastDisconnectAt = new Date().toISOString();
       sessions.set(sessionId, m);
       console.log(
-        `[wa] session ${sessionId} transient close code=${code} reason=${reason}`
+        `[wa] session ${sessionId} transient close code=${code} reason=${reason} label="${labelForCode(code)}"`
       );
+      notifyDisconnect(sessionId, code, reason, false);
 
       if (IMMEDIATE_RECONNECT.has(code)) {
         // WhatsApp asked us to reconnect immediately (restart required).
@@ -449,6 +511,9 @@ app.get("/sessions/:id/status", (req, res) => {
     qr: m.qrDataUrl,
     phone: m.phone || null,
     error: m.lastError || null,
+    error_code: m.lastErrorCode || null,
+    error_label: m.lastErrorLabel || null,
+    last_disconnect_at: m.lastDisconnectAt || null,
     pairing_code: m.pairingCode || null,
     pairing_phone: m.pairingPhone || null,
   });

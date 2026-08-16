@@ -831,6 +831,13 @@ async def my_sessions(user: dict = Depends(current_user)):
             live = await wa_client.session_status(s["id"])
             s["status"] = live.get("status", s.get("status", "unknown"))
             s["phone"] = live.get("phone") or s.get("phone")
+            # Expose disconnect reason so the list can show a warning icon.
+            s["last_disconnect_label"] = (
+                live.get("error_label") or s.get("last_disconnect_label")
+            )
+            s["last_disconnect_at"] = (
+                live.get("last_disconnect_at") or s.get("last_disconnect_at")
+            )
         except Exception:
             s["status"] = "unreachable"
         out.append(s)
@@ -920,6 +927,14 @@ async def get_session_status(session_id: str, user: dict = Depends(current_user)
     update = {"status": live.get("status", "unknown")}
     if live.get("phone"):
         update["phone"] = live["phone"]
+    # Propagate any disconnect info from Node so DB has authoritative data
+    # even if the Node process restarts and forgets its in-memory error.
+    if live.get("error_code") is not None:
+        update["last_disconnect_code"] = live["error_code"]
+    if live.get("error_label"):
+        update["last_disconnect_label"] = live["error_label"]
+    if live.get("last_disconnect_at"):
+        update["last_disconnect_at"] = live["last_disconnect_at"]
     await db.wa_sessions.update_one({"id": session_id}, {"$set": update})
     return {
         **s,
@@ -927,6 +942,10 @@ async def get_session_status(session_id: str, user: dict = Depends(current_user)
         "qr": live.get("qr"),
         "pairing_code": live.get("pairing_code"),
         "pairing_phone": live.get("pairing_phone"),
+        "error": live.get("error"),
+        "error_code": live.get("error_code"),
+        "error_label": live.get("error_label"),
+        "last_disconnect_at": update.get("last_disconnect_at") or s.get("last_disconnect_at"),
     }
 
 
@@ -1354,12 +1373,119 @@ async def dismiss_webhook_failure(failure_id: str, user: dict = Depends(current_
 
 
 # ---------------- Internal: inbound from Node service ----------------
-@api.post("/internal/inbound")
-async def inbound_message(payload: InboundIn, request: Request):
+def _require_internal_secret(request: Request):
     expected = os.environ.get("INTERNAL_SECRET", "")
     got = request.headers.get("X-Internal-Secret", "")
     if not expected or got != expected:
         raise HTTPException(status_code=401, detail="invalid internal secret")
+
+
+class DisconnectEventIn(BaseModel):
+    session_id: str
+    code: Optional[int] = None
+    reason: Optional[str] = None
+    label: Optional[str] = None
+    terminal: bool = False
+    at: Optional[str] = None
+
+
+@api.post("/internal/disconnect-event")
+async def record_disconnect_event(payload: DisconnectEventIn, request: Request):
+    """Called by the Node service every time a session drops. We persist a
+    history entry AND the latest reason on the session doc so the UI can
+    display "why did my WhatsApp disconnect?"."""
+    _require_internal_secret(request)
+
+    s = await db.wa_sessions.find_one({"id": payload.session_id}, {"_id": 0})
+    if not s:
+        return {"ok": False, "reason": "session not found"}
+
+    now = payload.at or now_iso()
+    label = payload.label or f"Code {payload.code}" if payload.code else "Unknown"
+
+    # Update session's latest disconnect info + status
+    await db.wa_sessions.update_one(
+        {"id": payload.session_id},
+        {
+            "$set": {
+                "last_disconnect_at": now,
+                "last_disconnect_code": payload.code,
+                "last_disconnect_reason": payload.reason,
+                "last_disconnect_label": label,
+                "last_disconnect_terminal": payload.terminal,
+                "status": "logged_out" if payload.terminal else "disconnected",
+            }
+        },
+    )
+
+    # Append to history collection (capped-ish: keep last 100 per session)
+    await db.disconnect_events.insert_one(
+        {
+            "id": new_id(),
+            "session_id": payload.session_id,
+            "user_id": s["user_id"],
+            "code": payload.code,
+            "reason": payload.reason,
+            "label": label,
+            "terminal": payload.terminal,
+            "at": now,
+        }
+    )
+    # Trim old events (keep newest 100 per session) — cheap because indexed on session_id
+    count = await db.disconnect_events.count_documents({"session_id": payload.session_id})
+    if count > 100:
+        cursor = (
+            db.disconnect_events.find({"session_id": payload.session_id}, {"id": 1, "_id": 0})
+            .sort("at", -1)
+            .skip(100)
+        )
+        old = await cursor.to_list(length=200)
+        if old:
+            await db.disconnect_events.delete_many(
+                {"id": {"$in": [x["id"] for x in old]}}
+            )
+
+    # Fire an email notification for terminal disconnects (once per event)
+    if payload.terminal:
+        try:
+            from email_service import notify_disconnect
+            user = await db.users.find_one({"id": s["user_id"]}, {"_id": 0})
+            if user:
+                asyncio.create_task(
+                    notify_disconnect(user, s.get("name", payload.session_id), reason=label)
+                )
+        except Exception as e:
+            logger.warning(f"disconnect email failed: {e}")
+
+    return {"ok": True}
+
+
+@api.get("/sessions/{session_id}/disconnect-history")
+async def session_disconnect_history(
+    session_id: str,
+    user: dict = Depends(current_user),
+    limit: int = Query(default=20, le=100),
+):
+    """Return the recent disconnect events for this session so the UI can
+    show a history/timeline. Own-session-only for privacy."""
+    s = await db.wa_sessions.find_one(
+        {"id": session_id, "user_id": user["id"]}, {"_id": 0}
+    )
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    cursor = (
+        db.disconnect_events.find(
+            {"session_id": session_id, "user_id": user["id"]}, {"_id": 0}
+        )
+        .sort("at", -1)
+        .limit(limit)
+    )
+    return {"items": await cursor.to_list(length=limit)}
+
+
+@api.post("/internal/inbound")
+async def inbound_message(payload: InboundIn, request: Request):
+    _require_internal_secret(request)
 
     s = await db.wa_sessions.find_one({"id": payload.session_id})
     if not s:
