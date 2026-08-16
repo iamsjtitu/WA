@@ -1,0 +1,47 @@
+{
+  "verdict": "fixed",
+  "user_reported_bug": "disconnect ka option aaraha hai par disconnect hua kyu ? [session 'Shruti Agro' phone 916370505556 with status: qr, Disconnect button visible, but NO reason/why-did-this-drop banner shown]",
+  "summary": "No relevant testing skill found. Verified the exact legacy qr/no-reason flow end to end: a qr session with phone set and no last_disconnect_label now shows the 'Why did this drop?' fallback banner with 'Reason not recorded for this drop.' and all 3 common causes. Verified recorded-label QR UI, disconnect history empty and ordered states, and status metadata. Connected-session no-banner check was verified with a MOCKED status response because no real connected WhatsApp account is available in preview.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/internal/disconnect-event",
+        "issue": "When called with code=440 but without a label, the backend stores last_disconnect_label as 'Code 440' instead of deriving the friendly 'Replaced by another device...' label. The normal Node pipeline sends labelForCode(code), so the user-facing flow still passed, but the endpoint is less robust than the test note implied."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/verify_disconnect_reason_backend.py",
+    "/app/test_reports/disconnect_reason_backend_results.json",
+    "/app/test_reports/verify_disconnect_reason_ui_playwright_snippet.py"
+  ],
+  "action_items": [
+    "Optional hardening: make /api/internal/disconnect-event derive known labels from code when payload.label is omitted, so direct code=440 test calls also get the friendly reason."
+  ],
+  "critical_code_review_comments": [
+    "SessionDetail.jsx renders data-testid=disconnect-reason for all !isConnected states; this fixes the reported legacy QR/no-label silence. It may be broader than the stated 'previously linked' condition for brand-new not-connected sessions, but that was not observed as a blocker for the reported bug.",
+    "GET /api/sessions/{id}/status returned error, error_code, error_label, last_disconnect_at, last_disconnect_code, last_disconnect_label, and last_disconnect_terminal after a recorded disconnect event."
+  ],
+  "updated_files": [
+    "/app/test_reports/verify_disconnect_reason_backend.py",
+    "/app/test_reports/disconnect_reason_backend_results.json",
+    "/app/test_reports/verify_disconnect_reason_ui_playwright_snippet.py",
+    "/app/test_reports/bug_verification_11.json",
+    "/app/test_reports/iteration_11.json"
+  ],
+  "success_rate": {
+    "backend": "89%",
+    "frontend": "100% for real QR/history UI checks; connected no-banner was MOCKED"
+  },
+  "seed_data_creation": "Created disposable admin sessions: legacy_qr_no_reason=41147f21-4398-4d08-b87b-38eb3e38855e, qr_with_440_label=b38a7cc0-5270-4c38-8e66-2945aaf9f251, qr_with_node_440_label=0f0ec830-76fc-4600-b713-42b85fa66a96, empty_history=caae64c7-e856-465c-aa52-d0a320769f1b, history_order=541d2fb7-6d32-4ec9-bd00-5b615382300a.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Use /app/test_reports/disconnect_reason_backend_results.json for the seeded session IDs. UI automation passed against the preview URL; connected-state check was MOCKED only due lack of a real connected WhatsApp session.",
+  "rca_of_the_issue": "Original issue reproduced as the legacy data shape: status=qr, phone set, no error_label/last_disconnect_label. After the fix, SessionDetail still renders the reason banner and falls back to common causes, so the customer now gets an explanation instead of silence."
+}

@@ -302,28 +302,55 @@ export default function SessionDetail() {
             <p className="font-mono text-xs text-neutral-600 mt-1">
               WhatsApp · {session.phone || "—"}
             </p>
-            {!isConnected && (session.error_label || session.last_disconnect_label) && (
+            {!isConnected && (
               <div className="mt-3 pt-3 border-t border-yellow-300" data-testid="disconnect-reason">
                 <p className="font-mono text-[10px] uppercase tracking-widest text-yellow-900">
                   why did this drop?
                 </p>
-                <p className="text-sm text-yellow-900 mt-1">
-                  {session.error_label || session.last_disconnect_label}
-                  {session.error_code || session.last_disconnect_code
-                    ? (
-                      <span className="font-mono text-[10px] text-yellow-700 ml-2">
-                        (code {session.error_code || session.last_disconnect_code})
-                      </span>
-                    ) : null}
-                </p>
-                {session.last_disconnect_at && (
-                  <p className="font-mono text-[10px] text-yellow-700 mt-1">
-                    at {new Date(session.last_disconnect_at).toLocaleString()}
-                  </p>
+                {(session.error_label || session.last_disconnect_label) ? (
+                  <>
+                    <p className="text-sm text-yellow-900 mt-1">
+                      {session.error_label || session.last_disconnect_label}
+                      {(session.error_code || session.last_disconnect_code) ? (
+                        <span className="font-mono text-[10px] text-yellow-700 ml-2">
+                          (code {session.error_code || session.last_disconnect_code})
+                        </span>
+                      ) : null}
+                    </p>
+                    {session.last_disconnect_at && (
+                      <p className="font-mono text-[10px] text-yellow-700 mt-1">
+                        at {new Date(session.last_disconnect_at).toLocaleString()}
+                      </p>
+                    )}
+                    <p className="text-xs text-yellow-800 mt-2">
+                      {reasonHint(session.error_code || session.last_disconnect_code)}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-yellow-900 mt-1">
+                      Reason not recorded for this drop.
+                    </p>
+                    <p className="text-xs text-yellow-800 mt-2">
+                      The three most common causes when a session shows QR again without you
+                      clicking Disconnect:
+                    </p>
+                    <ul className="text-xs text-yellow-800 mt-1 list-disc pl-5 space-y-0.5">
+                      <li>
+                        <b>Someone else linked this number</b> (max 4 linked devices — the oldest gets kicked).
+                      </li>
+                      <li>
+                        <b>You logged out from your phone</b> — WhatsApp → Linked Devices → tapped Log out on this device.
+                      </li>
+                      <li>
+                        <b>WhatsApp blocked the number</b> for spam-like activity (bulk sends to non-contacts).
+                      </li>
+                    </ul>
+                    <p className="text-xs text-yellow-800 mt-2">
+                      From now on, future disconnects will be labelled here with the exact code and time.
+                    </p>
+                  </>
                 )}
-                <p className="text-xs text-yellow-800 mt-2">
-                  {reasonHint(session.error_code || session.last_disconnect_code)}
-                </p>
               </div>
             )}
           </div>

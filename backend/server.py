@@ -1380,6 +1380,23 @@ def _require_internal_secret(request: Request):
         raise HTTPException(status_code=401, detail="invalid internal secret")
 
 
+# Human-friendly labels for Baileys disconnect codes (mirror wa-service/server.js
+# so backend can label events consistently if the caller omits `label`).
+_DISCONNECT_LABELS = {
+    400: "Bad request (protocol mismatch)",
+    401: "Logged out from phone (unlinked)",
+    403: "Forbidden / banned by WhatsApp",
+    405: "Method not allowed",
+    408: "Timed out",
+    411: "Multi-device not enabled",
+    428: "Connection closed by WhatsApp",
+    440: "Replaced by another device (someone else linked to this number)",
+    500: "Bad session file (auth corrupted)",
+    503: "WhatsApp service unavailable",
+    515: "Restart required (auto-reconnecting)",
+}
+
+
 class DisconnectEventIn(BaseModel):
     session_id: str
     code: Optional[int] = None
@@ -1401,7 +1418,15 @@ async def record_disconnect_event(payload: DisconnectEventIn, request: Request):
         return {"ok": False, "reason": "session not found"}
 
     now = payload.at or now_iso()
-    label = payload.label or f"Code {payload.code}" if payload.code else "Unknown"
+    # Prefer explicit label, else derive from code, else "Unknown".
+    if payload.label:
+        label = payload.label
+    elif payload.code and payload.code in _DISCONNECT_LABELS:
+        label = _DISCONNECT_LABELS[payload.code]
+    elif payload.code:
+        label = f"Disconnect code {payload.code}"
+    else:
+        label = "Unknown"
 
     # Update session's latest disconnect info + status
     await db.wa_sessions.update_one(
