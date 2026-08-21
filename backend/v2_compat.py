@@ -14,6 +14,7 @@ from pathlib import Path as PathLib
 from typing import Optional
 
 import asyncio
+import time
 import httpx
 from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFile, File
 
@@ -170,6 +171,16 @@ def parse_delay(delay_str: str) -> Optional[datetime]:
 def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_quota):
     api = APIRouter()
 
+    # Live-check cache: only "connected" is cached (positive TTL).
+    # Bulk-send workloads can hit _resolve_session hundreds of times per second
+    # — this trims Node service load without hiding real disconnects (they
+    # bypass the cache immediately).
+    LIVE_CHECK_TTL = 2.0
+    _LIVE_CHECK_CACHE: dict[str, tuple[float, str]] = {}
+
+    def _invalidate_live_check(session_id: str):
+        _LIVE_CHECK_CACHE.pop(session_id, None)
+
     async def user_from_bearer(request: Request) -> dict:
         # Accept Authorization: Bearer {api_key} OR X-API-Key OR ?token=
         # The key may be either a user-level master key OR a session-scoped key.
@@ -211,8 +222,17 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
         we return the live status so the caller can 400 with accurate info.
         Also fires an eager `start` if the session is `not_started` (server
         may have restarted since last DB update).
+
+        Result of successful checks is cached for LIVE_CHECK_TTL seconds so
+        bulk-send workloads don't hammer the Node service.
         """
         import wa_client  # local import to avoid circular in tests
+
+        # Cheap in-memory positive cache — only cache "connected" so that
+        # transient / disconnected states get rechecked immediately.
+        cached = _LIVE_CHECK_CACHE.get(session_id)
+        if cached and cached[0] > time.monotonic():
+            return True, cached[1]
 
         try:
             live = await wa_client.session_status(session_id)
@@ -227,6 +247,10 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
         await db.wa_sessions.update_one({"id": session_id}, {"$set": update})
 
         if live_status == "connected":
+            _LIVE_CHECK_CACHE[session_id] = (
+                time.monotonic() + LIVE_CHECK_TTL,
+                live_status,
+            )
             return True, "connected"
 
         # Session in Node was lost (process restart) — try eager start
@@ -241,6 +265,10 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
                         await db.wa_sessions.update_one(
                             {"id": session_id},
                             {"$set": {"status": "connected", "phone": live2.get("phone") or update.get("phone")}},
+                        )
+                        _LIVE_CHECK_CACHE[session_id] = (
+                            time.monotonic() + LIVE_CHECK_TTL,
+                            "connected",
                         )
                         return True, "connected_after_restart"
             except Exception:

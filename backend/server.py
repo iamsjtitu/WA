@@ -37,6 +37,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
 
+import metrics as api_metrics_mod
+
 import auth as auth_mod
 import billing as billing_mod
 import email_service
@@ -455,6 +457,43 @@ async def refresh_endpoint(request: Request, response: Response):
 
 
 # ---------------- Admin: Customers ----------------
+@api.get("/admin/reliability")
+async def reliability_stats(
+    window: str = Query(default="1h"),
+    session_id: Optional[str] = None,
+    bucket_minutes: int = Query(default=1, ge=1, le=60),
+    _: dict = Depends(admin_only),
+):
+    """Aggregate API telemetry for the admin dashboard.
+
+    - window: 5m | 1h | 6h | 24h | 7d
+    - session_id: optional filter to a single WA service
+    - bucket_minutes: granularity of the time-series (1 = per-minute)
+    """
+    return await api_metrics_mod.aggregate(
+        db, window=window, session_id=session_id, bucket_minutes=bucket_minutes
+    )
+
+
+@api.get("/admin/sessions")
+async def list_all_sessions(_: dict = Depends(admin_only)):
+    """Flat list of every WA session across all customers — used by the
+    reliability dashboard's session-filter dropdown."""
+    cursor = db.wa_sessions.find(
+        {}, {"_id": 0, "id": 1, "name": 1, "user_id": 1, "status": 1, "phone": 1}
+    )
+    sessions = await cursor.to_list(length=2000)
+    # Attach customer email for display
+    user_ids = list({s["user_id"] for s in sessions if s.get("user_id")})
+    users = await db.users.find(
+        {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "email": 1}
+    ).to_list(length=len(user_ids))
+    umap = {u["id"]: u["email"] for u in users}
+    for s in sessions:
+        s["customer"] = umap.get(s.get("user_id"), "—")
+    return sessions
+
+
 @api.get("/admin/customers")
 async def list_customers(_: dict = Depends(admin_only)):
     cursor = db.users.find({"role": "customer"}, {"_id": 0, "password_hash": 0})
@@ -2034,6 +2073,9 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+# API reliability telemetry — records every /api/v1|v2 request into db.api_metrics
+# (7d TTL). Must be added AFTER CORS so responses are already correct.
+app.add_middleware(api_metrics_mod.ApiMetricsMiddleware, db=db)
 
 
 # ---------------- Startup / Shutdown ----------------
@@ -2051,6 +2093,7 @@ async def on_startup():
         await db.scheduled_messages.create_index(
             [("status", 1), ("run_at", 1)]
         )
+        await api_metrics_mod.ensure_indexes(db)
     except Exception:
         logger.exception("index creation failed (non-fatal)")
 
