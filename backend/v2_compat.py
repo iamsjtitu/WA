@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path as PathLib
 from typing import Optional
 
+import asyncio
 import httpx
 from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFile, File
 
@@ -203,6 +204,49 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             raise HTTPException(status_code=401, detail="Invalid API token")
         return user
 
+    async def _live_check_and_maybe_reconnect(session_id: str) -> tuple[bool, str]:
+        """Ask the Node service for the ACTUAL socket status. If Node says
+        connected, DB is just stale (the reconnect event hasn't arrived yet)
+        — sync DB and return True. If Node says disconnected/qr/logged_out,
+        we return the live status so the caller can 400 with accurate info.
+        Also fires an eager `start` if the session is `not_started` (server
+        may have restarted since last DB update).
+        """
+        import wa_client  # local import to avoid circular in tests
+
+        try:
+            live = await wa_client.session_status(session_id)
+        except Exception:
+            return False, "wa_service_unreachable"
+
+        live_status = (live.get("status") or "").lower()
+        # Node's status wins over DB — sync back so future reads are consistent
+        update = {"status": live_status or "unknown"}
+        if live.get("phone"):
+            update["phone"] = live["phone"]
+        await db.wa_sessions.update_one({"id": session_id}, {"$set": update})
+
+        if live_status == "connected":
+            return True, "connected"
+
+        # Session in Node was lost (process restart) — try eager start
+        if live_status in ("not_started", "unknown"):
+            try:
+                await wa_client.start_session(session_id)
+                # Give Baileys ~3s to reach connected using cached creds
+                for _ in range(6):
+                    await asyncio.sleep(0.5)
+                    live2 = await wa_client.session_status(session_id)
+                    if (live2.get("status") or "").lower() == "connected":
+                        await db.wa_sessions.update_one(
+                            {"id": session_id},
+                            {"$set": {"status": "connected", "phone": live2.get("phone") or update.get("phone")}},
+                        )
+                        return True, "connected_after_restart"
+            except Exception:
+                pass
+        return False, live_status or "unknown"
+
     async def _resolve_session(user_id_or_user) -> dict:
         # Accept either a user_id string or a full user dict (for pinned session)
         if isinstance(user_id_or_user, dict):
@@ -215,12 +259,17 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
                 if s and s.get("status") == "connected":
                     return s
                 if s:
+                    # DB says not-connected — but Baileys may have already
+                    # silently reconnected. Ask Node before rejecting.
+                    ok, live_status = await _live_check_and_maybe_reconnect(pinned_id)
+                    if ok:
+                        s["status"] = "connected"
+                        return s
                     raise HTTPException(
                         status_code=400,
                         detail=(
                             "The session bound to this API key is not connected "
-                            f"(status={s.get('status', 'unknown')}). Re-link it from "
-                            "the dashboard."
+                            f"(status={live_status}). Re-link it from the dashboard."
                         ),
                     )
                 # Pinned session was deleted — fall through to error below
@@ -231,12 +280,24 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
         s = await db.wa_sessions.find_one(
             {"user_id": user_id, "status": "connected"}, {"_id": 0}
         )
-        if not s:
-            raise HTTPException(
-                status_code=400,
-                detail="No connected WhatsApp session. Link a session first.",
-            )
-        return s
+        if s:
+            return s
+        # DB has no "connected" session for this user. Before rejecting, try
+        # the most-recently-active session and live-check it.
+        recent = await db.wa_sessions.find_one(
+            {"user_id": user_id},
+            {"_id": 0},
+            sort=[("updated_at", -1)],
+        )
+        if recent:
+            ok, _ = await _live_check_and_maybe_reconnect(recent["id"])
+            if ok:
+                recent["status"] = "connected"
+                return recent
+        raise HTTPException(
+            status_code=400,
+            detail="No connected WhatsApp session. Link a session first.",
+        )
 
     async def _maybe_apply_country_code(session: dict, phone: str) -> str:
         cc = (session.get("default_country_code") or "").strip().lstrip("+")

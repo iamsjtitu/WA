@@ -1485,6 +1485,41 @@ async def record_disconnect_event(payload: DisconnectEventIn, request: Request):
     return {"ok": True}
 
 
+class ConnectEventIn(BaseModel):
+    session_id: str
+    phone: Optional[str] = None
+    at: Optional[str] = None
+
+
+@api.post("/internal/connect-event")
+async def record_connect_event(payload: ConnectEventIn, request: Request):
+    """Called by the Node service when a session's socket transitions to
+    OPEN (initial link OR silent reconnect). Backend flips DB status to
+    'connected' and clears disconnect_* fields so subsequent API calls
+    don't hit stale-status false-negatives."""
+    _require_internal_secret(request)
+    s = await db.wa_sessions.find_one({"id": payload.session_id}, {"_id": 0})
+    if not s:
+        return {"ok": False, "reason": "session not found"}
+    update = {
+        "status": "connected",
+        "last_connected_at": payload.at or now_iso(),
+    }
+    if payload.phone:
+        update["phone"] = payload.phone
+    await db.wa_sessions.update_one(
+        {"id": payload.session_id},
+        {
+            "$set": update,
+            "$unset": {
+                # Clear stale disconnect info — session is healthy again
+                "last_disconnect_terminal": 1,
+            },
+        },
+    )
+    return {"ok": True}
+
+
 @api.get("/sessions/{session_id}/disconnect-history")
 async def session_disconnect_history(
     session_id: str,

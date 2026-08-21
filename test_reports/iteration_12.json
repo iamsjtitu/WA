@@ -1,0 +1,24 @@
+{
+  "summary": "Verified the session-resolve DB/Node desync fix end-to-end. Backend: 5/5 pytest cases in test_session_resolve_desync.py pass; direct curl smoke-tests confirm (a) /api/internal/connect-event requires X-Internal-Secret (401 without), (b) with the correct secret and a valid session_id it flips DB status to 'connected' and returns {ok:true}, (c) unknown session_id returns 200 with {ok:false,reason:'session not found'}, (d) forcing DB status='disconnected' then POSTing /api/v2/sendMessage with the session's api_key returns 400 whose detail contains the LIVE Node status ('qr'), NOT the stale 'disconnected', and (e) the DB row is synced from 'disconnected' -> 'qr' after that single sendMessage call proving the live-check + write-back path executed. Frontend: /app/sessions renders api-key-cell-<sessionId> containing the full 'wa9x_...' string by default (no masking), and the api-key-reveal-<sessionId> eye toggle correctly hides (bullets) on 1st click and un-hides on 2nd click.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_session_resolve_desync.py",
+    "/app/test_reports/pytest/iteration_12.xml",
+    "/app/test_reports/sessions_ok.jpeg"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "v2_compat._resolve_session now performs a live Node lookup on cache-miss/disconnected and syncs the DB — good. Consider caching the live-check result briefly (a few seconds) to avoid hammering the Node service under bulk-send workloads.",
+    "POST /api/internal/connect-event is properly guarded by INTERNAL_SECRET (constant-time compare recommended if not already used).",
+    "Sessions.jsx uses `revealed[s.id] === false` for masked state so undefined defaults to revealed — matches product intent. The full key being in the DOM by default is a deliberate UX decision; keep the copy button prominent."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (5/5 pytest + 4/4 curl smokes)", "frontend": "100% (3/3 UI checks)"},
+  "test_credentials": "admin@wa.9x.design / admin123",
+  "seed_data_creation": "None — used existing admin session id=627629bc-5cbe-4298-87da-e2e4423e0567 (Test Service). DB status was toggled to 'disconnected' during the desync test; final state ended at 'qr' (live Node reality) after the auto-sync.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Preview env has no linked WhatsApp, so Node reports status 'qr' (or 'not_started'/'connecting' after eager-start). The desync fix is confirmed by two signals: sendMessage error detail contains the live status ('status=qr'), and wa_sessions.status is rewritten away from 'disconnected' on every send call. INTERNAL_SECRET must be read from /app/backend/.env at test time. Route is /app/sessions (page title 'WhatsApp Services', sidebar label 'Services').",
+  "rca_of_the_issue": "Root cause was that only the Node process knew when Baileys silently reconnected — FastAPI relied on a stale DB flag written at last known state change and returned 400 ('disconnected') even after Node had already re-opened the socket. Fix: (1) Node pushes a connect-event to FastAPI on every connection.open, updating wa_sessions.status='connected'; (2) v2_compat._resolve_session now live-checks /internal/status on Node before returning 400 and rewrites DB to the live value; (3) On 'not_started' it triggers an eager start; (4) Any 400 returned now embeds the LIVE status so callers see the true state. All verified against the preview env."
+}

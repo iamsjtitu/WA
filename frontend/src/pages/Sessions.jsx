@@ -147,18 +147,18 @@ export default function Sessions() {
                       className="inline-flex items-center gap-1.5 font-mono text-[11px] bg-neutral-100 border border-neutral-200 sharp px-2 py-1 max-w-[260px]"
                       data-testid={`api-key-cell-${s.id}`}
                     >
-                      <span className="truncate" title={revealed[s.id] ? s.api_key : "Click eye to reveal"}>
-                        {revealed[s.id]
-                          ? s.api_key
-                          : `${s.api_key.slice(0, 8)}••••••••${s.api_key.slice(-4)}`}
+                      <span className="truncate" title={revealed[s.id] === false ? "Click eye to reveal" : s.api_key}>
+                        {revealed[s.id] === false
+                          ? `${s.api_key.slice(0, 8)}••••••••${s.api_key.slice(-4)}`
+                          : s.api_key}
                       </span>
                       <button
-                        onClick={() => setRevealed((r) => ({ ...r, [s.id]: !r[s.id] }))}
+                        onClick={() => setRevealed((r) => ({ ...r, [s.id]: r[s.id] === false }))}
                         className="text-neutral-500 hover:text-neutral-900 p-0.5"
-                        title={revealed[s.id] ? "Hide" : "Reveal"}
+                        title={revealed[s.id] === false ? "Reveal" : "Hide"}
                         data-testid={`api-key-reveal-${s.id}`}
                       >
-                        {revealed[s.id] ? <EyeSlash size={12} /> : <Eye size={12} />}
+                        {revealed[s.id] === false ? <Eye size={12} /> : <EyeSlash size={12} />}
                       </button>
                       <button
                         onClick={() => {

@@ -88,7 +88,6 @@ async function notifyDisconnect(sessionId, code, reason, terminal) {
       terminal: !!terminal,
       at: new Date().toISOString(),
     });
-    // Node 18+ has global fetch; use AbortController for a short timeout.
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 3000);
     await fetch(`${fastapi}/api/internal/disconnect-event`, {
@@ -102,6 +101,33 @@ async function notifyDisconnect(sessionId, code, reason, terminal) {
     }).finally(() => clearTimeout(t));
   } catch (e) {
     console.error(`[wa] notifyDisconnect failed session=${sessionId}: ${e.message}`);
+  }
+}
+
+// Notify FastAPI when connection becomes OPEN so DB status flips to
+// "connected" immediately (fixes DB-vs-Node desync during silent reconnects).
+async function notifyConnect(sessionId, phone) {
+  try {
+    const fastapi = process.env.FASTAPI_URL || "http://127.0.0.1:8001";
+    const secret = process.env.INTERNAL_SECRET || "";
+    const body = JSON.stringify({
+      session_id: sessionId,
+      phone: phone || null,
+      at: new Date().toISOString(),
+    });
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 3000);
+    await fetch(`${fastapi}/api/internal/connect-event`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Secret": secret,
+      },
+      body,
+      signal: ctrl.signal,
+    }).finally(() => clearTimeout(t));
+  } catch (e) {
+    console.error(`[wa] notifyConnect failed session=${sessionId}: ${e.message}`);
   }
 }
 
@@ -314,6 +340,10 @@ async function startSession(sessionId) {
       m.phone = sock.user?.id?.split(":")[0]?.split("@")[0] || null;
       m.lastError = null;
       m.retryCount = 0; // reset on successful connect
+      sessions.set(sessionId, m);
+      // Push status to backend IMMEDIATELY so DB status is fresh even when
+      // this was a silent reconnect (fixes intermittent "not connected" 400s).
+      notifyConnect(sessionId, m.phone);
       // Keep-alive: send a presence update every 4 min so WhatsApp doesn't
       // silently drop the session as "idle". This is the #1 cause of daily
       // "1-3 day disconnects".
