@@ -20,6 +20,7 @@ Schema:
 """
 from __future__ import annotations
 
+import asyncio
 import time
 import re
 from datetime import datetime, timedelta, timezone
@@ -84,25 +85,42 @@ class ApiMetricsMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         latency_ms = int((time.perf_counter() - started) * 1000)
 
-        # Never block the response on metric writes
+        # Fire-and-forget the DB write so it NEVER delays the client response.
+        # If we `await` it here, a slow Mongo insert can hold the connection
+        # open past Cloudflare's tolerance (→ 520 "invalid response").
         try:
-            user_id, session_id = await _resolve_owner(self.db, request)
-            await self.db.api_metrics.insert_one(
-                {
-                    "id": _short_id(),
-                    "at": datetime.now(timezone.utc),
-                    "method": request.method,
-                    "path": path,
-                    "route": _extract_route(path),
-                    "status": response.status_code,
-                    "latency_ms": latency_ms,
-                    "session_id": session_id,
-                    "user_id": user_id,
-                }
+            asyncio.create_task(
+                _record_metric(
+                    self.db,
+                    request,
+                    response.status_code,
+                    latency_ms,
+                    path,
+                )
             )
         except Exception:
-            pass  # metrics are best-effort
+            pass
         return response
+
+
+async def _record_metric(db, request: Request, status: int, latency_ms: int, path: str):
+    try:
+        user_id, session_id = await _resolve_owner(db, request)
+        await db.api_metrics.insert_one(
+            {
+                "id": _short_id(),
+                "at": datetime.now(timezone.utc),
+                "method": request.method,
+                "path": path,
+                "route": _extract_route(path),
+                "status": status,
+                "latency_ms": latency_ms,
+                "session_id": session_id,
+                "user_id": user_id,
+            }
+        )
+    except Exception:
+        pass  # metrics are best-effort
 
 
 def _short_id() -> str:

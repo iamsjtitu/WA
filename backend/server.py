@@ -1043,9 +1043,22 @@ async def pair_session(
         raise HTTPException(status_code=404, detail="Session not found")
     try:
         result = await wa_client.request_pairing_code(session_id, payload.phone)
+        if not result.get("pairing_code"):
+            # Node returned {}—surface it explicitly so the UI doesn't sit on
+            # empty dashes for 15 minutes.
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "wa-service returned no pairing code. "
+                    "Baileys may still be initialising — try again in 5s."
+                ),
+            )
         return result
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        logger.exception(f"pair_session failed session={session_id}")
+        raise HTTPException(status_code=502, detail=f"Pairing failed: {e}")
 
 
 @api.delete("/sessions/{session_id}")
