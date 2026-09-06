@@ -732,55 +732,67 @@ app.post("/sessions/:id/send", async (req, res) => {
   }
 });
 
-app.post("/sessions/:id/send-media", async (req, res) => {
-  const id = req.params.id;
-  const { to, file_path, caption, file_name, mime_type, delete_after } = req.body || {};
-  if (!to || !file_path)
-    return res.status(400).json({ error: "to and file_path required" });
-
-  const m = ensureSession(id);
-  if (!m || m.status !== "connected") {
-    return res
-      .status(400)
-      .json({ error: `session not connected (status=${m?.status || "not_started"})` });
-  }
-  if (!fs.existsSync(file_path)) {
-    return res.status(400).json({ error: "file not found at path" });
-  }
+// Outbound media arrives as a raw body from FastAPI (metadata in headers) and is
+// handed to Baileys as a Buffer — nothing touches the disk on either side.
+const RAW_MEDIA_LIMIT = "120mb";
+function b64Header(req, name) {
+  const v = req.headers[name];
+  if (!v) return "";
   try {
-    const toStr = String(to);
-    const jid = toStr.includes("@") ? toStr : jidFromPhone(toStr);
-    const mt = String(mime_type || "").toLowerCase();
-    let payload;
-    if (mt.startsWith("image/")) {
-      payload = { image: { url: file_path }, caption: caption || undefined };
-    } else if (mt.startsWith("video/")) {
-      payload = { video: { url: file_path }, caption: caption || undefined };
-    } else if (mt.startsWith("audio/")) {
-      payload = { audio: { url: file_path }, mimetype: mt, ptt: false };
-    } else {
-      payload = {
-        document: { url: file_path },
-        mimetype: mt || "application/octet-stream",
-        fileName: file_name || path.basename(file_path),
-        caption: caption || undefined,
-      };
-    }
-    const result = await m.sock.sendMessage(jid, payload);
-    if (delete_after) {
-      try {
-        fs.unlinkSync(file_path);
-      } catch {}
-    }
-    res.json({
-      ok: true,
-      message_id: result?.key?.id || null,
-      to,
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+    return Buffer.from(String(v), "base64").toString("utf8");
+  } catch {
+    return "";
   }
-});
+}
+
+app.post(
+  "/sessions/:id/send-media",
+  express.raw({ type: () => true, limit: RAW_MEDIA_LIMIT }),
+  async (req, res) => {
+    const id = req.params.id;
+    const to = req.headers["x-wa-to"];
+    const buffer = Buffer.isBuffer(req.body) ? req.body : null;
+    if (!to || !buffer || buffer.length === 0)
+      return res.status(400).json({ error: "X-Wa-To header and non-empty body required" });
+    const caption = b64Header(req, "x-wa-caption-b64");
+    const fileName = b64Header(req, "x-wa-file-name-b64") || "file";
+    const mt = String(req.headers["x-wa-mime"] || "").toLowerCase();
+
+    const m = ensureSession(id);
+    if (!m || m.status !== "connected") {
+      return res
+        .status(400)
+        .json({ error: `session not connected (status=${m?.status || "not_started"})` });
+    }
+    try {
+      const toStr = String(to);
+      const jid = toStr.includes("@") ? toStr : jidFromPhone(toStr);
+      let payload;
+      if (mt.startsWith("image/")) {
+        payload = { image: buffer, caption: caption || undefined };
+      } else if (mt.startsWith("video/")) {
+        payload = { video: buffer, caption: caption || undefined };
+      } else if (mt.startsWith("audio/")) {
+        payload = { audio: buffer, mimetype: mt, ptt: false };
+      } else {
+        payload = {
+          document: buffer,
+          mimetype: mt || "application/octet-stream",
+          fileName,
+          caption: caption || undefined,
+        };
+      }
+      const result = await m.sock.sendMessage(jid, payload);
+      res.json({
+        ok: true,
+        message_id: result?.key?.id || null,
+        to,
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  }
+);
 
 app.get("/sessions/:id/groups", async (req, res) => {
   const id = req.params.id;
@@ -830,19 +842,16 @@ app.post("/sessions/:id/send-group", async (req, res) => {
   try {
     let result;
     if (url) {
-      // download to temp + send as image (default)
-      const tmpFile = path.join(__dirname, "uploads", `${Date.now()}_grp_${Math.random().toString(36).slice(2)}.bin`);
+      // download into memory + send (image by default)
       const r = await fetch(url);
       if (!r.ok) return res.status(400).json({ error: `failed to fetch url: HTTP ${r.status}` });
       const buf = Buffer.from(await r.arrayBuffer());
-      fs.writeFileSync(tmpFile, buf);
       const ct = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
       let payload;
-      if (ct.startsWith("image/")) payload = { image: { url: tmpFile }, caption: text || undefined };
-      else if (ct.startsWith("video/")) payload = { video: { url: tmpFile }, caption: text || undefined };
-      else payload = { document: { url: tmpFile }, mimetype: ct || "application/octet-stream", caption: text || undefined };
+      if (ct.startsWith("image/")) payload = { image: buf, caption: text || undefined };
+      else if (ct.startsWith("video/")) payload = { video: buf, caption: text || undefined };
+      else payload = { document: buf, mimetype: ct || "application/octet-stream", caption: text || undefined };
       result = await m.sock.sendMessage(jid, payload);
-      try { fs.unlinkSync(tmpFile); } catch {}
     } else {
       if (!text) return res.status(400).json({ error: "text or url required" });
       result = await m.sock.sendMessage(jid, { text: String(text) });

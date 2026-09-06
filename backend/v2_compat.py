@@ -21,8 +21,19 @@ from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFil
 import url_guard
 
 logger = logging.getLogger("wa9x.v2")
-UPLOAD_DIR = PathLib("/app/wa-service/uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+async def _read_upload_capped(file: UploadFile) -> Optional[bytes]:
+    """Read a multipart upload into memory; None if it exceeds MAX_FILE_SIZE_BYTES."""
+    buf = bytearray()
+    while True:
+        chunk = await file.read(1 << 20)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > MAX_FILE_SIZE_BYTES:
+            return None
+    return bytes(buf)
 
 
 def now_ts() -> str:
@@ -402,9 +413,6 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Failed to fetch url: {e}")
             url_path = httpx.URL(url).path
-            ext = PathLib(url_path).suffix or ""
-            file_path = UPLOAD_DIR / f"{new_id()}{ext}"
-            file_path.write_bytes(r.content)
             mime = (
                 r.headers.get("content-type", "application/octet-stream")
                 .split(";")[0]
@@ -415,7 +423,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
                 session["id"],
                 phone,
                 text or "",
-                str(file_path),
+                r.content,
                 PathLib(url_path).name or "file",
                 mime,
                 "v2_api",
@@ -793,14 +801,23 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
 
         session = await _resolve_session(user)
 
-        # Materialise the document onto disk so the Node service can stream it
+        # Read the document into memory — it is streamed to the co-located Node
+        # process, never persisted on the backend.
         if file:
-            ext = PathLib(file.filename or "").suffix or ""
-            local = UPLOAD_DIR / f"{new_id()}{ext}"
-            content = await file.read()
-            local.write_bytes(content)
+            content = bytearray()
+            while True:
+                chunk = await file.read(1 << 20)
+                if not chunk:
+                    break
+                content.extend(chunk)
+                if len(content) > MAX_FILE_SIZE_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large. Max {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB.",
+                    )
+            data = bytes(content)
             mime = (file.content_type or "application/octet-stream").split(";")[0].strip().lower()
-            display_name = file_name or file.filename or local.name
+            display_name = file_name or file.filename or "file"
         else:
             try:
                 r = await url_guard.safe_get(url, timeout=60.0)
@@ -821,9 +838,8 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
                 or PathLib(url_path).suffix
                 or ""
             )
-            local = UPLOAD_DIR / f"{new_id()}{ext}"
-            local.write_bytes(r.content)
-            display_name = file_name or PathLib(url_path).name or local.name
+            data = r.content
+            display_name = file_name or PathLib(url_path).name or f"file{ext}"
 
         # Quota: 1 message per recipient
         await enforce_quota(user, 1)
@@ -838,7 +854,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
                 session["id"],
                 phone,
                 caption or "",
-                str(local),
+                data,
                 display_name,
                 mime,
                 "v2_api_document",
@@ -892,21 +908,16 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             rj = await wa_client.send_media(
                 session["id"],
                 f"{gid_clean}@g.us",
-                str(local),
+                data,
                 caption or "",
                 display_name,
                 mime,
-                True,
             )
             msg_doc["status"] = "sent"
             msg_doc["wa_message_id"] = rj.get("message_id")
         except Exception as e:
             msg_doc["status"] = "failed"
             msg_doc["error"] = str(e)
-            try:
-                local.unlink(missing_ok=True)
-            except Exception:
-                pass
 
         await db.messages.insert_one(msg_doc)
         if msg_doc["status"] == "sent":
@@ -973,29 +984,18 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
                 "data": {},
             }
 
-        ext = PathLib(display_name).suffix or ""
-        local = UPLOAD_DIR / f"{new_id()}{ext}"
-        size = 0
-        with local.open("wb") as out:
-            while True:
-                chunk = await file.read(1 << 20)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > MAX_FILE_SIZE_BYTES:
-                    out.close()
-                    local.unlink(missing_ok=True)
-                    response.status_code = 413
-                    return {
-                        "success": False,
-                        "statusCode": 413,
-                        "timestamp": now_ts(),
-                        "error": (
-                            f"File too large. Max {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB."
-                        ),
-                        "data": {},
-                    }
-                out.write(chunk)
+        data = await _read_upload_capped(file)
+        if data is None:
+            response.status_code = 413
+            return {
+                "success": False,
+                "statusCode": 413,
+                "timestamp": now_ts(),
+                "error": (
+                    f"File too large. Max {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB."
+                ),
+                "data": {},
+            }
 
         await enforce_quota(user, 1)
         msg = await send_media_one(
@@ -1003,7 +1003,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             session["id"],
             phone,
             caption or "",
-            str(local),
+            data,
             display_name,
             mime,
             "v2_api_message_file",
@@ -1064,29 +1064,18 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
 
         session = await _resolve_session(user)
 
-        ext = PathLib(display_name).suffix or ""
-        local = UPLOAD_DIR / f"{new_id()}{ext}"
-        size = 0
-        with local.open("wb") as out:
-            while True:
-                chunk = await file.read(1 << 20)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > MAX_FILE_SIZE_BYTES:
-                    out.close()
-                    local.unlink(missing_ok=True)
-                    response.status_code = 413
-                    return {
-                        "success": False,
-                        "statusCode": 413,
-                        "timestamp": now_ts(),
-                        "error": (
-                            f"File too large. Max {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB."
-                        ),
-                        "data": {},
-                    }
-                out.write(chunk)
+        data = await _read_upload_capped(file)
+        if data is None:
+            response.status_code = 413
+            return {
+                "success": False,
+                "statusCode": 413,
+                "timestamp": now_ts(),
+                "error": (
+                    f"File too large. Max {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB."
+                ),
+                "data": {},
+            }
 
         await enforce_quota(user, 1)
         msg_id = new_id()
@@ -1112,21 +1101,16 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             rj = await wa_client.send_media(
                 session["id"],
                 gid_jid,
-                str(local),
+                data,
                 caption or "",
                 display_name,
                 mime,
-                True,
             )
             msg_doc["status"] = "sent"
             msg_doc["wa_message_id"] = rj.get("message_id")
         except Exception as e:
             msg_doc["status"] = "failed"
             msg_doc["error"] = str(e) or "group file send failed"
-            try:
-                local.unlink(missing_ok=True)
-            except Exception:
-                pass
 
         await db.messages.insert_one(msg_doc)
         if msg_doc["status"] == "sent":

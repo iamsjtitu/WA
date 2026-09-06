@@ -1,6 +1,7 @@
 """HTTP client for the local Baileys Node microservice."""
 from __future__ import annotations
 
+import base64
 import os
 from typing import Optional
 
@@ -100,23 +101,29 @@ async def request_pairing_code(session_id: str, phone: str) -> dict:
 async def send_media(
     session_id: str,
     to: str,
-    file_path: str,
+    data: bytes,
     caption: str,
     file_name: str,
     mime_type: str,
-    delete_after: bool = True,
 ) -> dict:
+    """Stream the media bytes straight to the co-located Node process.
+
+    Nothing is written to disk on the backend; Node hands the Buffer to Baileys.
+    Metadata rides in base64 headers (captions/filenames may be non-latin-1).
+    """
+    headers = {
+        "Content-Type": "application/octet-stream",
+        "X-Wa-To": str(to),
+        "X-Wa-Caption-B64": base64.b64encode((caption or "").encode()).decode(),
+        "X-Wa-File-Name-B64": base64.b64encode((file_name or "file").encode()).decode(),
+        "X-Wa-Mime": mime_type or "application/octet-stream",
+    }
     async with _client() as c:
         r = await c.post(
             f"/sessions/{session_id}/send-media",
-            json={
-                "to": to,
-                "file_path": file_path,
-                "caption": caption,
-                "file_name": file_name,
-                "mime_type": mime_type,
-                "delete_after": delete_after,
-            },
+            content=data,
+            headers=headers,
+            timeout=180.0,
         )
         if r.status_code >= 400:
             try:

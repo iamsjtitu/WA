@@ -245,10 +245,6 @@ def normalize_phone(phone: str) -> str:
 
 
 # ---------------- Webhook helpers ----------------
-UPLOAD_DIR = PathLib("/app/wa-service/uploads")
-INBOUND_MEDIA_DIR = PathLib("/app/wa-service/uploads/inbound")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-INBOUND_MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
 WEBHOOK_RETRY_DELAYS = [2, 6, 18]  # seconds — 3 attempts total
 WEBHOOK_AUTO_DISABLE_AFTER = 10  # consecutive failures
@@ -1122,17 +1118,13 @@ async def _send_media_one(
     session_id: str,
     to: str,
     caption: str,
-    file_path: str,
+    data: bytes,
     file_name: str,
     mime_type: str,
     source: str,
 ):
     phone = normalize_phone(to)
     if not phone:
-        try:
-            PathLib(file_path).unlink(missing_ok=True)
-        except Exception:
-            pass
         return {"to": to, "status": "failed", "error": "invalid phone"}
     primary = mime_type.split("/")[0] if "/" in mime_type else "document"
     msg_doc = {
@@ -1154,17 +1146,13 @@ async def _send_media_one(
     }
     try:
         result = await wa_client.send_media(
-            session_id, phone, file_path, caption or "", file_name, mime_type, True
+            session_id, phone, data, caption or "", file_name, mime_type
         )
         msg_doc["status"] = "sent"
         msg_doc["wa_message_id"] = result.get("message_id")
     except Exception as e:
         msg_doc["status"] = "failed"
         msg_doc["error"] = str(e)
-        try:
-            PathLib(file_path).unlink(missing_ok=True)
-        except Exception:
-            pass
     await db.messages.insert_one(msg_doc)
     msg_doc.pop("_id", None)
     return msg_doc
@@ -1253,12 +1241,9 @@ async def send_media_dashboard(
         raise HTTPException(status_code=404, detail="Session not found")
     await _enforce_quota(user, 1)
 
-    ext = PathLib(media.filename or "file").suffix or ""
-    file_path = UPLOAD_DIR / f"{new_id()}{ext}"
     contents = await media.read()
     if len(contents) > 25 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 25MB)")
-    file_path.write_bytes(contents)
     mime = media.content_type or "application/octet-stream"
 
     msg = await _send_media_one(
@@ -1266,7 +1251,7 @@ async def send_media_dashboard(
         session_id,
         to,
         caption,
-        str(file_path),
+        contents,
         media.filename or "file",
         mime,
         "dashboard_media",
@@ -1819,9 +1804,6 @@ async def public_send(payload: ApiSendIn, request: Request):
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to fetch media_url: {e}")
         url_path = httpx.URL(payload.media_url).path
-        ext = PathLib(url_path).suffix or ""
-        file_path = UPLOAD_DIR / f"{new_id()}{ext}"
-        file_path.write_bytes(r.content)
         mime = (
             r.headers.get("content-type", "application/octet-stream")
             .split(";")[0]
@@ -1832,7 +1814,7 @@ async def public_send(payload: ApiSendIn, request: Request):
             s["id"],
             payload.to,
             payload.caption or payload.text or "",
-            str(file_path),
+            r.content,
             payload.file_name or PathLib(url_path).name or "file",
             mime,
             "api_media",
@@ -2025,9 +2007,6 @@ async def _scheduled_dispatcher():
                             try:
                                 r = await url_guard.safe_get(sched["url"], timeout=30.0)
                                 r.raise_for_status()
-                                ext = PathLib(httpx.URL(sched["url"]).path).suffix or ""
-                                fp = UPLOAD_DIR / f"{new_id()}{ext}"
-                                fp.write_bytes(r.content)
                                 mime = (
                                     r.headers.get("content-type", "application/octet-stream")
                                     .split(";")[0]
@@ -2038,7 +2017,7 @@ async def _scheduled_dispatcher():
                                     sched["session_id"],
                                     sched["target"],
                                     sched.get("text") or "",
-                                    str(fp),
+                                    r.content,
                                     PathLib(httpx.URL(sched["url"]).path).name or "file",
                                     mime,
                                     "schedule",
