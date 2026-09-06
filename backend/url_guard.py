@@ -65,11 +65,25 @@ def check_url(url: str) -> None:
             )
 
 
+_FETCH_HEADERS = {
+    # Many CDNs (Wikimedia, some Cloudflare sites, Google Drive) return 403 for
+    # the default `python-httpx/x.y` UA. Present as a normal browser client.
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0 Safari/537.36 wa9x-media-fetcher/1.0"
+    ),
+    "Accept": "image/*,video/*,audio/*,application/pdf,application/*;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.8",
+}
+
+
 async def safe_get(url: str, *, timeout: float = 30.0) -> httpx.Response:
     """httpx.get with SSRF guard applied before each redirect hop."""
     check_url(url)
     # follow_redirects=False so we manually validate each hop
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+    async with httpx.AsyncClient(
+        timeout=timeout, follow_redirects=False, headers=_FETCH_HEADERS
+    ) as client:
         for _ in range(5):  # max 5 redirects
             r = await client.get(url)
             if r.is_redirect and r.headers.get("location"):
