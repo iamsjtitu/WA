@@ -6,8 +6,13 @@ import { Boom } from "@hapi/boom";
 import path from "path";
 import fs from "fs";
 import crypto from "node:crypto";
+import dns from "node:dns";
 import { fileURLToPath } from "url";
 import * as baileysPkg from "@whiskeysockets/baileys";
+
+// Many VPSes advertise IPv6 but have a broken v6 route; prefer v4 so fetches to
+// GitHub / WhatsApp don't hang on unreachable AAAA records.
+dns.setDefaultResultOrder("ipv4first");
 
 const {
   makeWASocket,
@@ -15,6 +20,7 @@ const {
   useMultiFileAuthState,
   Browsers,
   fetchLatestBaileysVersion,
+  fetchLatestWaWebVersion,
   downloadMediaMessage,
 } = baileysPkg;
 
@@ -70,18 +76,28 @@ let cachedWaVersion = null;
 let waVersionSource = "none";
 
 async function resolveWaVersion() {
-  const timeout = new Promise((r) => setTimeout(() => r(null), 8000));
-  try {
-    const res = await Promise.race([fetchLatestBaileysVersion(), timeout]);
-    if (res?.isLatest && Array.isArray(res.version)) {
-      cachedWaVersion = res.version;
-      waVersionSource = "github";
-      return res.version;
+  const withTimeout = (p, ms = 8000) =>
+    Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
+  // 1. Baileys-pinned version on GitHub (maintainers' known-good)
+  // 2. Live client_revision from web.whatsapp.com (works when GitHub is blocked on the VPS)
+  // 3. Last good in-memory value  4. Hard-coded pin
+  const sources = [
+    ["github", () => fetchLatestBaileysVersion()],
+    ["wa-web", () => fetchLatestWaWebVersion()],
+  ];
+  for (const [name, fn] of sources) {
+    try {
+      const res = await withTimeout(fn());
+      if (res?.isLatest && Array.isArray(res.version)) {
+        cachedWaVersion = res.version;
+        waVersionSource = name;
+        return res.version;
+      }
+      if (res?.error) console.error(`[wa] version source ${name} failed: ${res.error.message}`);
+      else if (!res) console.error(`[wa] version source ${name} timed out (8s)`);
+    } catch (e) {
+      console.error(`[wa] version source ${name} threw: ${e.message}`);
     }
-    if (res?.error) console.error(`[wa] fetchLatestBaileysVersion failed: ${res.error.message}`);
-    else if (!res) console.error("[wa] fetchLatestBaileysVersion timed out (8s)");
-  } catch (e) {
-    console.error(`[wa] fetchLatestBaileysVersion threw: ${e.message}`);
   }
   if (cachedWaVersion) {
     waVersionSource = "cache";
@@ -541,9 +557,10 @@ async function probe(url, ms = 8000) {
 }
 
 app.get("/diag", async (_req, res) => {
-  const [github, whatsapp] = await Promise.all([
+  const [github, whatsapp, waSw] = await Promise.all([
     probe("https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/index.ts"),
     probe("https://web.whatsapp.com/"),
+    probe("https://web.whatsapp.com/sw.js"),
   ]);
   const version = await resolveWaVersion();
   const list = [];
@@ -565,7 +582,7 @@ app.get("/diag", async (_req, res) => {
     wasm_simd: WebAssembly.validate(
       new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])
     ),
-    reachability: { github, whatsapp },
+    reachability: { github, whatsapp, whatsapp_sw: waSw },
     auth_dir: AUTH_ROOT,
     sessions: list,
   });
