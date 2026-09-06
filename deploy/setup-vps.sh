@@ -162,7 +162,7 @@ WA_AUTH_DIR="/var/lib/wa9x/auth"
 BACKEND_PUBLIC_URL="https://${DOMAIN}"
 FRONTEND_URL="https://${DOMAIN}"
 INSTALL_DIR="${APP_DIR}"
-AUTO_UPDATE_RESTART_CMD="supervisorctl restart wa9x-backend"
+AUTO_UPDATE_RESTART_CMD="supervisorctl restart wa9x-backend wa9x-wa-service"
 STRIPE_SECRET_KEY=""
 STRIPE_WEBHOOK_SECRET=""
 RAZORPAY_KEY_ID=""
@@ -204,9 +204,27 @@ environment=PYTHONUNBUFFERED="1"
 user=root
 EOF
 
+# wa-service (Node.js Baileys) — env vars are inherited from backend/.env so we
+# source it before spawn. Running under its own supervisor entry means the
+# process survives backend restarts and gets independent logs.
+cat > /etc/supervisor/conf.d/wa9x-wa-service.conf << EOF
+[program:wa9x-wa-service]
+command=/bin/bash -c 'set -a && source $APP_DIR/backend/.env && set +a && exec /usr/bin/node server.js'
+directory=$APP_DIR/wa-service
+autostart=true
+autorestart=true
+startsecs=5
+stopasgroup=true
+killasgroup=true
+stderr_logfile=/var/log/wa9x-wa-service.err.log
+stdout_logfile=/var/log/wa9x-wa-service.out.log
+user=root
+EOF
+
 supervisorctl reread
 supervisorctl update
 supervisorctl restart wa9x-backend || supervisorctl start wa9x-backend
+supervisorctl restart wa9x-wa-service || supervisorctl start wa9x-wa-service
 
 # ---------------- 11. Nginx + Let's Encrypt ----------------
 log "Configuring Nginx for ${DOMAIN}"

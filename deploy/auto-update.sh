@@ -11,7 +11,7 @@
 set -euo pipefail
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/wa9x}"
-RESTART_CMD="${AUTO_UPDATE_RESTART_CMD:-supervisorctl restart wa9x-backend}"
+RESTART_CMD="${AUTO_UPDATE_RESTART_CMD:-supervisorctl restart wa9x-backend wa9x-wa-service}"
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
