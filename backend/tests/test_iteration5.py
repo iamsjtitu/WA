@@ -195,7 +195,7 @@ class TestSessionsAndPair:
             json={"phone": "919876543210"},
             timeout=20,
         )
-        assert r.status_code in (200, 502), f"unexpected {r.status_code}: {r.text}"
+        assert r.status_code in (200, 502, 503), f"unexpected {r.status_code}: {r.text}"
         if r.status_code == 200:
             body = r.json()
             assert "pairing_code" in body, body

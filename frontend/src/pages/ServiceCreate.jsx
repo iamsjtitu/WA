@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import api from "../lib/api";
+import api, { formatErr } from "../lib/api";
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowClockwise,
   Phone,
   QrCode,
   Check,
@@ -61,6 +62,8 @@ export default function ServiceCreate() {
   const [pairingCode, setPairingCode] = useState("");
   const [qrData, setQrData] = useState(null);
   const [status, setStatus] = useState("starting");
+  const [connError, setConnError] = useState(null);
+  const [retrying, setRetrying] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(15 * 60); // 15 min
   const pollRef = useRef(null);
 
@@ -74,6 +77,12 @@ export default function ServiceCreate() {
         const { data } = await api.get(`/sessions/${sessionId}/status`);
         setStatus(data.status);
         if (data.qr) setQrData(data.qr);
+        if (data.pairing_code) setPairingCode(data.pairing_code);
+        if (["disconnected", "logged_out"].includes(data.status) && (data.error || data.error_label)) {
+          setConnError({ label: data.error_label, reason: data.error, code: data.error_code });
+        } else if (["qr", "connected"].includes(data.status)) {
+          setConnError(null);
+        }
         if (data.status === "connected") {
           clearInterval(pollRef.current);
           toast.success("Connected to WhatsApp");
@@ -85,6 +94,28 @@ export default function ServiceCreate() {
     pollRef.current = setInterval(poll, 2500);
     return () => clearInterval(pollRef.current);
   }, [step, sessionId, navigate]);
+
+  const retryConnection = async () => {
+    if (!sessionId || retrying) return;
+    setRetrying(true);
+    setConnError(null);
+    setQrData(null);
+    setPairingCode("");
+    setStatus("connecting");
+    try {
+      await api.post(`/sessions/${sessionId}/restart`);
+      if (method === "phone") {
+        const fullPhone = (country.code + phoneLocal).replace(/[^0-9]/g, "");
+        const { data } = await api.post(`/sessions/${sessionId}/pair`, { phone: fullPhone });
+        if (data.pairing_code) setPairingCode(data.pairing_code);
+      }
+      setSecondsLeft(15 * 60);
+    } catch (e) {
+      toast.error(formatErr(e?.response?.data?.detail) || "Retry failed");
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   useEffect(() => {
     if (step !== 5) return;
@@ -133,7 +164,7 @@ export default function ServiceCreate() {
             if (data.pairing_code) setPairingCode(data.pairing_code);
           } catch (e) {
             toast.error(
-              e?.response?.data?.detail || "Pairing code failed — falling back to QR"
+              formatErr(e?.response?.data?.detail) || "Pairing code failed — falling back to QR"
             );
           }
         }
@@ -250,6 +281,9 @@ export default function ServiceCreate() {
             status={status}
             secondsLeft={secondsLeft}
             timeStr={fmtTime(secondsLeft)}
+            connError={connError}
+            onRetry={retryConnection}
+            retrying={retrying}
           />
         )}
       </div>
@@ -527,7 +561,41 @@ function Step4Preparing({ prepDone, method }) {
 }
 
 // ============ Step 5 ============
-function Step5Connect({ method, qrData, pairingCode, phoneFull, status, timeStr }) {
+function ConnectionErrorBanner({ connError, status, onRetry, retrying }) {
+  const failed = ["disconnected", "logged_out"].includes(status);
+  if (!failed) return null;
+  return (
+    <div
+      className="mt-6 border border-red-300 bg-red-50 sharp p-4 flex flex-col sm:flex-row sm:items-center gap-3"
+      data-testid="connection-error-banner"
+    >
+      <Warning size={22} weight="fill" className="text-red-600 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="font-display font-semibold text-red-800 text-sm">
+          WhatsApp connection failed
+          {connError?.code ? <span className="font-mono text-xs ml-2">code {connError.code}</span> : null}
+        </p>
+        <p className="text-sm text-red-700 mt-0.5" data-testid="connection-error-reason">
+          {connError?.label || connError?.reason || "The server could not reach WhatsApp. Check network / firewall and retry."}
+        </p>
+        {connError?.label && connError?.reason && connError.reason !== connError.label ? (
+          <p className="font-mono text-[11px] text-red-600/80 mt-1 break-all">{connError.reason}</p>
+        ) : null}
+      </div>
+      <button
+        onClick={onRetry}
+        disabled={retrying}
+        className="btn-primary text-sm inline-flex items-center gap-2 disabled:opacity-60 shrink-0"
+        data-testid="retry-connection-btn"
+      >
+        {retrying ? <Spinner size={14} className="animate-spin" /> : <ArrowClockwise size={14} />}
+        Retry connection
+      </button>
+    </div>
+  );
+}
+
+function Step5Connect({ method, qrData, pairingCode, phoneFull, status, timeStr, connError, onRetry, retrying }) {
   const copy = (txt) => {
     navigator.clipboard.writeText(txt);
     toast.success("Copied");
@@ -541,6 +609,7 @@ function Step5Connect({ method, qrData, pairingCode, phoneFull, status, timeStr 
         <p className="text-sm text-neutral-600 mt-1">
           Open WhatsApp on +{phoneFull} → Linked Devices → Link with phone number.
         </p>
+        <ConnectionErrorBanner connError={connError} status={status} onRetry={onRetry} retrying={retrying} />
 
         <div className="mt-6 grid lg:grid-cols-2 gap-6">
           <div className="border-2 border-[#1FA855] sharp p-8 bg-emerald-50/40 flex flex-col items-center">
@@ -600,6 +669,7 @@ function Step5Connect({ method, qrData, pairingCode, phoneFull, status, timeStr 
       <p className="text-sm text-neutral-600 mt-1">
         Open WhatsApp → Linked Devices → Link a device → Scan the QR.
       </p>
+      <ConnectionErrorBanner connError={connError} status={status} onRetry={onRetry} retrying={retrying} />
 
       <div className="mt-6 grid lg:grid-cols-2 gap-6">
         <div className="border-2 border-[#1FA855] sharp p-6 bg-emerald-50/40 flex flex-col items-center">

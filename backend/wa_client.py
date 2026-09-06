@@ -134,3 +134,10 @@ async def health() -> bool:
             return r.status_code == 200
     except Exception:
         return False
+
+
+async def diag() -> dict:
+    async with _client() as c:
+        r = await c.get("/diag", timeout=25.0)
+        r.raise_for_status()
+        return r.json()

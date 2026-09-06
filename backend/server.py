@@ -962,7 +962,7 @@ async def get_session_status(session_id: str, user: dict = Depends(current_user)
     try:
         live = await wa_client.session_status(session_id)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"WA service error: {e}")
+        raise HTTPException(status_code=503, detail=f"WA service error: {e}")
     update = {"status": live.get("status", "unknown")}
     if live.get("phone"):
         update["phone"] = live["phone"]
@@ -1027,7 +1027,7 @@ async def restart_session(session_id: str, user: dict = Depends(current_user)):
         await wa_client.start_session(session_id)
         return {"ok": True}
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 class PairIn(BaseModel):
@@ -1047,7 +1047,7 @@ async def pair_session(
             # Node returned {}—surface it explicitly so the UI doesn't sit on
             # empty dashes for 15 minutes.
             raise HTTPException(
-                status_code=502,
+                status_code=503,
                 detail=(
                     "wa-service returned no pairing code. "
                     "Baileys may still be initialising — try again in 5s."
@@ -1058,7 +1058,18 @@ async def pair_session(
         raise
     except Exception as e:
         logger.exception(f"pair_session failed session={session_id}")
-        raise HTTPException(status_code=502, detail=f"Pairing failed: {e}")
+        # NOTE: never use 502/504 here — Cloudflare replaces origin 502/504 with
+        # its own branded error page and the real Baileys reason is lost.
+        raise HTTPException(status_code=503, detail=f"Pairing failed: {e}")
+
+
+@api.get("/admin/wa-service/diag")
+async def wa_service_diag(_: dict = Depends(admin_only)):
+    """Node/Baileys versions + outbound reachability (GitHub, WhatsApp) for VPS debugging."""
+    try:
+        return await wa_client.diag()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"wa-service unreachable: {e}")
 
 
 @api.delete("/sessions/{session_id}")

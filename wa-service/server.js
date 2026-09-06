@@ -50,6 +50,47 @@ function extForMime(mime) {
 
 const logger = pino({ level: "warn" });
 
+function readBaileysVersion() {
+  try {
+    const p = path.join(__dirname, "node_modules", "@whiskeysockets", "baileys", "package.json");
+    return JSON.parse(fs.readFileSync(p, "utf8")).version;
+  } catch {
+    return "unknown";
+  }
+}
+const BAILEYS_PKG_VERSION = readBaileysVersion();
+
+// WhatsApp Web version fallback. Baileys' bundled default goes stale quickly and an
+// outdated version makes WhatsApp reject the socket with 405 "Connection Failure".
+// GitHub is the source of truth; this pin is only used when GitHub is unreachable
+// (blocked/slow VPS networks). Keep it in sync with
+// https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/index.ts
+const FALLBACK_WA_VERSION = [2, 3000, 1043857760];
+let cachedWaVersion = null;
+let waVersionSource = "none";
+
+async function resolveWaVersion() {
+  const timeout = new Promise((r) => setTimeout(() => r(null), 8000));
+  try {
+    const res = await Promise.race([fetchLatestBaileysVersion(), timeout]);
+    if (res?.isLatest && Array.isArray(res.version)) {
+      cachedWaVersion = res.version;
+      waVersionSource = "github";
+      return res.version;
+    }
+    if (res?.error) console.error(`[wa] fetchLatestBaileysVersion failed: ${res.error.message}`);
+    else if (!res) console.error("[wa] fetchLatestBaileysVersion timed out (8s)");
+  } catch (e) {
+    console.error(`[wa] fetchLatestBaileysVersion threw: ${e.message}`);
+  }
+  if (cachedWaVersion) {
+    waVersionSource = "cache";
+    return cachedWaVersion;
+  }
+  waVersionSource = "fallback";
+  return FALLBACK_WA_VERSION;
+}
+
 // session_id -> { sock, status, qrDataUrl, phone, lastError, lastErrorCode, lastErrorReason, lastDisconnectAt, retryCount, keepAliveTimer, reconnectTimer }
 const sessions = new Map();
 
@@ -200,7 +241,10 @@ async function startSession(sessionId) {
   }
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-  const { version } = await fetchLatestBaileysVersion();
+  const version = await resolveWaVersion();
+  console.log(
+    `[wa] session ${sessionId} starting — wa-web v${version.join(".")} (${waVersionSource}), baileys ${BAILEYS_PKG_VERSION}, node ${process.version}`
+  );
 
   const sock = makeWASocket({
     version,
@@ -331,7 +375,11 @@ async function startSession(sessionId) {
         m.qrDataUrl = null;
       }
       m.status = "qr";
+      m.lastError = null;
+      m.lastErrorCode = null;
+      m.lastErrorLabel = null;
       sessions.set(sessionId, m);
+      console.log(`[wa] session ${sessionId} QR received`);
     }
 
     if (connection === "open") {
@@ -362,6 +410,10 @@ async function startSession(sessionId) {
     if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
       const reason = lastDisconnect?.error?.message || `code=${code}`;
+      const detail = lastDisconnect?.error?.data?.message || lastDisconnect?.error?.output?.payload?.message;
+      console.log(
+        `[wa] session ${sessionId} connection closed code=${code} reason="${reason}"${detail ? ` detail="${detail}"` : ""}`
+      );
 
       // Stop keep-alive on any close — will restart on reconnect
       if (m.keepAliveTimer) {
@@ -473,6 +525,52 @@ app.use((req, res, next) => {
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
+// Diagnostics for VPS troubleshooting: versions + outbound reachability.
+async function probe(url, ms = 8000) {
+  const started = Date.now();
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(url, { method: "GET", signal: ctrl.signal, redirect: "manual" });
+    return { ok: true, status: r.status, ms: Date.now() - started };
+  } catch (e) {
+    return { ok: false, error: e.cause?.code || e.name || e.message, ms: Date.now() - started };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+app.get("/diag", async (_req, res) => {
+  const [github, whatsapp] = await Promise.all([
+    probe("https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/index.ts"),
+    probe("https://web.whatsapp.com/"),
+  ]);
+  const version = await resolveWaVersion();
+  const list = [];
+  for (const [id, m] of sessions.entries()) {
+    list.push({
+      session_id: id,
+      status: m.status,
+      error: m.lastError || null,
+      error_code: m.lastErrorCode || null,
+      retry_count: m.retryCount || 0,
+    });
+  }
+  res.json({
+    node: process.version,
+    baileys: BAILEYS_PKG_VERSION,
+    wa_web_version: version.join("."),
+    wa_web_version_source: waVersionSource,
+    fallback_wa_web_version: FALLBACK_WA_VERSION.join("."),
+    wasm_simd: WebAssembly.validate(
+      new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])
+    ),
+    reachability: { github, whatsapp },
+    auth_dir: AUTH_ROOT,
+    sessions: list,
+  });
+});
+
 app.post("/sessions/:id/start", async (req, res) => {
   const id = req.params.id;
   try {
@@ -516,6 +614,29 @@ app.post("/sessions/:id/pair", async (req, res) => {
   if (!m?.sock) return res.status(500).json({ error: "socket init failed" });
   if (m.sock.authState?.creds?.registered) {
     return res.status(400).json({ error: "already registered" });
+  }
+  // requestPairingCode sends an IQ over the WS — it throws "Connection Closed"
+  // if the handshake with WhatsApp hasn't finished yet. Wait until the socket
+  // is actually open (QR event = handshake done) or the session died.
+  for (let i = 0; i < 150; i++) {
+    m = sessions.get(id);
+    if (!m?.sock) break;
+    if (m.sock.ws?.isOpen && m.status === "qr") break;
+    if (["disconnected", "logged_out"].includes(m.status)) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (!m?.sock || ["disconnected", "logged_out"].includes(m.status)) {
+    const why = m?.lastErrorLabel || m?.lastError || "connection closed";
+    const code = m?.lastErrorCode ? ` (code ${m.lastErrorCode})` : "";
+    return res.status(500).json({
+      error: `WhatsApp connection failed before pairing: ${why}${code}`,
+      error_code: m?.lastErrorCode || null,
+    });
+  }
+  if (!m.sock.ws?.isOpen) {
+    return res.status(500).json({
+      error: "WhatsApp socket did not open within 15s — check server network / firewall to web.whatsapp.com",
+    });
   }
   const cleanPhone = String(phone).replace(/[^0-9]/g, "");
   try {
@@ -733,6 +854,8 @@ async function restoreSessions() {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, "127.0.0.1", () => {
-  console.log(`[wa] service listening on :${PORT}`);
+  console.log(
+    `[wa] service listening on :${PORT} — node ${process.version}, baileys ${BAILEYS_PKG_VERSION}, auth_dir=${AUTH_ROOT}`
+  );
   restoreSessions();
 });

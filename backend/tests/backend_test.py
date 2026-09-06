@@ -285,7 +285,7 @@ class TestSessions:
         # Acceptable behaviors:
         # - 200 with status=failed (since send_one catches exception)
         # - 4xx error
-        assert r.status_code in (200, 400, 404, 500, 502)
+        assert r.status_code in (200, 400, 404, 500, 502, 503)
         if r.status_code == 200:
             body = r.json()
             assert body.get("status") in ("failed", "queued"), f"Expected failed/queued, got {body}"

@@ -282,7 +282,7 @@ class TestRegression:
             f"{BASE_URL}/api/v2/groupChat/getGroupList",
             headers={"Authorization": f"Bearer {session_api_key}"}, timeout=15,
         )
-        assert r.status_code in (400, 404, 502), f"got {r.status_code}: {r.text[:200]}"
+        assert r.status_code in (400, 404, 502, 503), f"got {r.status_code}: {r.text[:200]}"
         assert "session" in r.text.lower() or "connect" in r.text.lower()
 
     def test_v2_account_with_session_api_key(self, session_api_key):
