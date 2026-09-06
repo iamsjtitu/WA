@@ -1802,7 +1802,7 @@ async def public_send(payload: ApiSendIn, request: Request):
         except url_guard.UnsafeURLError as e:
             raise HTTPException(status_code=400, detail=f"Refused unsafe media_url: {e}")
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to fetch media_url: {e}")
+            raise HTTPException(status_code=400, detail=f"Failed to fetch media_url: {url_guard.describe_error(e)}")
         url_path = httpx.URL(payload.media_url).path
         mime = (
             r.headers.get("content-type", "application/octet-stream")

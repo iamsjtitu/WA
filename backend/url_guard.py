@@ -31,6 +31,13 @@ class UnsafeURLError(ValueError):
     """URL points at a disallowed target (private/internal/metadata)."""
 
 
+def describe_error(e: BaseException) -> str:
+    """httpx errors like ConnectTimeout often have an empty str(); keep the class name."""
+    msg = str(e).strip()
+    name = type(e).__name__
+    return f"{name}: {msg}" if msg else name
+
+
 def _is_denied(ip_str: str) -> bool:
     try:
         ip = ipaddress.ip_address(ip_str)

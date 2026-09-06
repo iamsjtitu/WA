@@ -411,7 +411,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             except url_guard.UnsafeURLError as e:
                 raise HTTPException(status_code=400, detail=f"Refused unsafe url: {e}")
             except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Failed to fetch url: {e}")
+                raise HTTPException(status_code=400, detail=f"Failed to fetch url: {url_guard.describe_error(e)}")
             url_path = httpx.URL(url).path
             mime = (
                 r.headers.get("content-type", "application/octet-stream")
@@ -825,7 +825,7 @@ def make_router(db, wa_client, fire_webhook, send_one, send_media_one, enforce_q
             except url_guard.UnsafeURLError as e:
                 raise HTTPException(status_code=400, detail=f"Refused unsafe url: {e}")
             except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Failed to fetch url: {e}")
+                raise HTTPException(status_code=400, detail=f"Failed to fetch url: {url_guard.describe_error(e)}")
             mime = (
                 r.headers.get("content-type", "application/octet-stream")
                 .split(";")[0]

@@ -130,6 +130,12 @@ async def send_media(
                 detail = r.json().get("error", "send failed")
             except Exception:
                 detail = "send failed"
+            if "file_path" in detail:
+                # Old Node build still running (pre raw-body contract).
+                detail = (
+                    "wa-service is running outdated code — run "
+                    "`supervisorctl restart wa9x-wa-service` on the server"
+                )
             raise RuntimeError(detail)
         return r.json()
 
