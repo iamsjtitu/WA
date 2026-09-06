@@ -7,6 +7,10 @@ module.exports = [
   { ignores: ["build/**", "node_modules/**", "craco.config.js", "tailwind.config.js", "postcss.config.js"] },
   js.configs.recommended,
   {
+    files: ["*.js", "plugins/**/*.js"],
+    languageOptions: { ecmaVersion: 2022, sourceType: "commonjs", globals: globals.node },
+  },
+  {
     files: ["src/**/*.{js,jsx}"],
     plugins: { react, "react-hooks": reactHooks },
     languageOptions: {
